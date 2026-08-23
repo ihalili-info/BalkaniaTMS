@@ -101,20 +101,15 @@ export const connectors: Connector[] = [
     note: "Google Geocoding or Mapbox; no provider chosen yet.",
   },
   {
-    id: "sent-sms",
-    name: "Sent SMS",
-    purpose: "Dispatch, proximity and delivery alerts over SMS.",
+    id: "sent",
+    name: "Sent (sent.dm)",
+    purpose:
+      "Customer alerts over SMS, WhatsApp and RCS through one API, with provider-side channel fallback.",
     icon: "sms",
     status: "not_configured",
-    envVars: ["SENT_DM_API_KEY", "SENT_SENDER_ID"],
-  },
-  {
-    id: "sent-whatsapp",
-    name: "Sent WhatsApp",
-    purpose: "The same alerts over WhatsApp Business, where the customer prefers it.",
-    icon: "chat",
-    status: "not_configured",
-    envVars: ["SENT_DM_API_KEY", "SENT_SENDER_ID"],
+    envVars: ["SENT_DM_API_KEY", "SENT_PROFILE_ID", "SENT_WEBHOOK_SECRET"],
+    endpoint: "POST https://api.sent.dm/v3/messages",
+    note: "Leave the channel unset so Sent picks and falls back — one message, one charge. Naming channels explicitly is a broadcast: each one is a separate message and a separate charge.",
   },
 ];
 

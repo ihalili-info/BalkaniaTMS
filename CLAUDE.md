@@ -173,6 +173,29 @@ Keep the default SMS body inside GSM-7. A single em dash or accented character
 flips the whole message to UCS-2 and cuts the per-segment budget from 153 to 67
 characters — that alone doubled a route message from 3 segments to 6.
 
+## Messaging provider — Sent (sent.dm)
+
+`POST https://api.sent.dm/v3/messages`, authenticated with an `x-api-key`
+header. Client in `web/src/lib/messaging/sent.ts`.
+
+Two behaviours here differ from a Twilio-shaped API and both cost money:
+
+- **`channel` is a broadcast list, not a fallback order.** `["sms","whatsapp"]`
+  sends *two* messages and bills for both; the customer gets the alert twice.
+  **Omitting `channel` is what gives cross-channel fallback** — that is the
+  right default for a transactional alert, and it is what `deliverBy: "auto"`
+  does. There is deliberately no "all channels" option in the UI.
+- **`template` and `text` are mutually exclusive** — exactly one, or the API
+  returns 400. Raw `text` is supported, so the message templates in the app
+  work without registering anything with the provider.
+
+RCS is a first-class channel alongside SMS and WhatsApp (migration 0007 widened
+the `driver_messages.channel` CHECK to match).
+
+**Unverified:** the `x-profile-id` sender-profile header, and the signing scheme
+for inbound delivery-status webhooks. Confirm both against the account before
+relying on them — `.env.example` says so too.
+
 ## Order intake
 
 Until the CRM webhook is built, orders arrive through **CSV import** on the

@@ -15,7 +15,7 @@
 | **Backend & Database** | **Supabase** | PostgreSQL database with **PostGIS** extension for geospatial calculations, webhooks, and real-time state updates. |
 | **Authentication** | **Supabase Auth** | Login and role-based access. Two roles in `profiles.role`: `admin` (all modules) and `dispatcher` (all except Integrations), enforced by RLS — see migration 0004. |
 | **Geocoding** | **Google Geocoding API** (or Mapbox) | Converts CRM delivery addresses into `GEOGRAPHY(Point, 4326)` coordinates during order ingestion. |
-| **Communications** | **Sent** (sent.dm) | Unified SMS/WhatsApp/RCS API for triggered dispatch and proximity alerts. |
+| **Communications** | **Sent** (sent.dm) | Unified SMS/WhatsApp/RCS API for triggered dispatch and proximity alerts. `POST /v3/messages`, `x-api-key` auth. Leave `channel` unset so Sent falls back across channels — naming several broadcasts and bills per channel. |
 | **Telematics / GPS** | **Verizon Connect Reveal** (formerly Fleetmatics) | EU tenant `fim.eu.fleetmatics.com`. GPS webhook push into `/api/webhooks/gps` (Basic auth we set). RAD REST pull is fallback only — no fleet-wide endpoint, and Verizon caps polling at one call per vehicle every 3–5 minutes. |
 | **Tachograph** | **Smart tachograph API** | Reg. (EU) 165/2014. Driver cards and duty time, feeding the Reg. 561/2006 counters on `drivers`. Deliberately separate from the GPS feed — position is not duty. |
 | **Customs** | **Declaration provider** *(not chosen)* | Export/import declarations for GB movements and Windsor Framework lanes for Northern Ireland. |

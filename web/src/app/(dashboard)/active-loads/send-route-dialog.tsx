@@ -227,7 +227,7 @@ export function SendRouteDialog({
             <div className="mb-2 flex flex-wrap items-center gap-3">
               <h3 className="text-heading text-ink">Message</h3>
               <div className="flex gap-1 rounded-sm border border-hairline bg-surface-muted p-0.5">
-                {(["sms", "whatsapp"] as Channel[]).map((c) => (
+                {(["sms", "whatsapp", "rcs"] as Channel[]).map((c) => (
                   <button
                     key={c}
                     type="button"
@@ -240,7 +240,7 @@ export function SendRouteDialog({
                         : "text-ink-muted hover:text-ink",
                     )}
                   >
-                    {c === "sms" ? "SMS" : "WhatsApp"}
+                    {c === "sms" ? "SMS" : c === "whatsapp" ? "WhatsApp" : "RCS"}
                   </button>
                 ))}
               </div>
@@ -288,7 +288,7 @@ export function SendRouteDialog({
               onSend({ channel, body, to: phone ?? "" })
             }
           >
-            {phone ? `Send ${channel === "sms" ? "SMS" : "WhatsApp"}` : "No driver number"}
+            {phone ? `Send ${channel.toUpperCase()}` : "No driver number"}
           </Button>
         </footer>
       </div>

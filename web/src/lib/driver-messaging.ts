@@ -9,7 +9,8 @@
 import { NAV_TARGETS, type NavApp } from "./navigation-links";
 import type { Driver, LoadView, Stop } from "./types";
 
-export type Channel = "sms" | "whatsapp";
+/** Matches the driver_messages CHECK; RCS added in migration 0007. */
+export type Channel = "sms" | "whatsapp" | "rcs";
 
 export interface DriverMessage {
   id: string;
