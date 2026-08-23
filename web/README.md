@@ -102,15 +102,22 @@ The sidebar has a **demo-only** role switcher because nothing authenticates yet
 real guards. It disappears with Supabase Auth, since a real user cannot choose
 their own role.
 
-To wire real auth, replace the body of `getCurrentUser()` in
-`lib/auth/session.ts` (the doc comment has the exact query) and build a sign-in
-page. Everything downstream is already role-aware. Take the role from
+Auth is wired: `/sign-in` (email + password), session refresh in `proxy.ts`,
+and the role read from `profiles`. It activates automatically once
+`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are set —
+without them the app stays in demo mode so the fixture deployment keeps
+working.
+
+**The first admin is set in migration 0004**, by email. Nobody can promote
+themselves, so there is no in-app path to the first admin by design. Take the role from
 `profiles`, never from user metadata the client can write.
 
 ## Swapping fixtures for Supabase
 
-1. Provision the project, enable PostGIS, apply `supabase/migrations/` in order
-   (0004 turns on RLS — after that, an unauthenticated client sees nothing).
+1. Provision the project, enable PostGIS, apply `supabase/migrations/` **in
+   numerical order** (0004 turns on RLS — after that, an unauthenticated client
+   sees nothing, and 0004 also backfills profiles for any auth users that
+   already exist).
 2. Fill `.env.local` from `.env.example`.
 3. Per page, replace the `@/lib/demo/fleet` import with a query through
    `@/lib/supabase/server`, returning the same `LoadView` / `Order` shapes.

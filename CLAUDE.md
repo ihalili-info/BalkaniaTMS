@@ -80,8 +80,9 @@ that validator before changing any of those three values.
 primitives and SVG charts; all six pages built out against demo fixtures and
 verified in-browser; Supabase client helpers; DB migrations written.
 
-**Not done:** everything is fixtures. No page reads Supabase, no API routes
-exist, and nothing authenticates (the role model is built; the sign-in is not).
+**Not done:** the pages still read fixtures. Supabase Auth *is* wired
+(`/sign-in`, session refresh in `proxy.ts`, roles from `profiles`), but no page
+queries real data yet.
 Orders arrive by **CSV import** — a deliberate stopgap until
 `/api/webhooks/crm` exists. Truck edits on the Fleet page live in React state
 and vanish on refresh — `updateTruck` in `fleet/fleet-manager.tsx` is the single
@@ -246,6 +247,20 @@ Enforced in four layers, and **the first one is not security**:
 `admin` — matching `DEFAULT 'dispatcher'` on the column and the signup trigger.
 A fallback to admin is the kind of line that quietly survives into production.
 
+**Two modes, chosen by config.** With `NEXT_PUBLIC_SUPABASE_URL` set,
+`getCurrentUser()` reads a real Supabase session and takes the role from
+`profiles` — never from user metadata, which the client can write. Without it,
+the app falls back to the demo cookie so the fixture deployment keeps working.
+`setDemoRole` refuses outright once Supabase is configured, so the switcher
+cannot become an escalation path.
+
+**Bootstrapping the first admin is a migration, not a screen.** Nobody can
+promote themselves (`profiles_update_self` pins `role`), so 0004 backfills
+profiles for pre-existing `auth.users` and sets `admin@balkania.ie` to `admin`.
+The backfill matters: the signup trigger only fires on INSERT, so users created
+in the Supabase dashboard *before* the migration would otherwise have no
+profile — and no profile means no role means locked out.
+
 Nobody may edit their own `role`: the `profiles_update_self` policy pins it to
 the existing value, otherwise every restriction would be voluntary.
 
@@ -310,9 +325,6 @@ tracker — `trk-06` in the fixtures is deliberately both.
 - **ETA-based geofence triggering** (vs. straight-line distance) needs a
   routing/ETA API — not yet chosen. `estimateMinutes()` in `lib/format.ts` is a
   crude 45 km/h stand-in for display only; it must never gate an alert.
-- **No login screen.** Roles, guards and RLS policies exist, but nothing
-  authenticates: `getCurrentUser()` reads a demo cookie. Supabase Auth plugs
-  into that one function — see the worked example in its doc comment.
 - GPS polling is capped by the **provider**, not by Vercel. Verizon asks for no
   more than one call per vehicle every 3–5 minutes, and there is no fleet-wide
   endpoint — so polling costs one HTTP call per truck per cycle. Vercel Cron's

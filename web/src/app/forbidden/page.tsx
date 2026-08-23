@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { Card, Icon } from "@/components/ui";
-import { getCurrentUser } from "@/lib/auth/session";
+import { requireUser } from "@/lib/auth/session";
 import { ROLES, moduleForPath, modulesFor } from "@/lib/auth/roles";
 
 export const metadata: Metadata = { title: "No access" };
@@ -11,7 +11,7 @@ export default async function ForbiddenPage({
   searchParams,
 }: PageProps<"/forbidden">) {
   const { from } = await searchParams;
-  const user = await getCurrentUser();
+  const user = await requireUser();
   const blocked = typeof from === "string" ? moduleForPath(from) : undefined;
   const allowed = modulesFor(user.role);
 

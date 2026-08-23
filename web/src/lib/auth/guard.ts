@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { canAccessPath, type Role } from "./roles";
-import { getCurrentUser } from "./session";
+import { requireUser } from "./session";
 
 /**
  * Server-side guard for a module page — layer 3 of 4.
@@ -13,7 +13,7 @@ import { getCurrentUser } from "./session";
  * Call it at the top of any module page whose `roles` are narrower than all.
  */
 export async function requireAccess(pathname: string): Promise<{ role: Role }> {
-  const user = await getCurrentUser();
+  const user = await requireUser();
   if (!canAccessPath(user.role, pathname)) {
     redirect(`/forbidden?from=${encodeURIComponent(pathname)}`);
   }

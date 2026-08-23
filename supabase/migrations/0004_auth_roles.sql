@@ -50,6 +50,39 @@ CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
+-- Backfill for users who already existed.
+--
+-- The trigger above only fires on INSERT, so anyone created in the Supabase
+-- dashboard *before* this migration ran has no profile — and with RLS on, no
+-- profile means no role, which means locked out of everything. Idempotent, so
+-- it is safe on a fresh database too (where it simply finds nothing).
+INSERT INTO public.profiles (id, full_name, role)
+SELECT
+  u.id,
+  COALESCE(u.raw_user_meta_data ->> 'full_name', split_part(u.email, '@', 1)),
+  'dispatcher'
+FROM auth.users u
+ON CONFLICT (id) DO NOTHING;
+
+-- Bootstrap the first admin.
+--
+-- Someone has to be able to reach Integrations, and nobody can promote
+-- themselves — `profiles_update_self` pins `role` to its existing value. That
+-- is deliberate, and it means the first admin must be set here rather than in
+-- the app. Change the address to suit; re-running is harmless.
+UPDATE public.profiles p
+   SET role = 'admin',
+       depot = 'Ballymount Terminal, Dublin'
+  FROM auth.users u
+ WHERE u.id = p.id
+   AND lower(u.email) = 'admin@balkania.ie';
+
+UPDATE public.profiles p
+   SET depot = 'Ballymount Terminal, Dublin'
+  FROM auth.users u
+ WHERE u.id = p.id
+   AND lower(u.email) = 'dispatch@balkania.ie';
+
 -- ===========================================================================
 -- 2. Role helpers
 -- ===========================================================================

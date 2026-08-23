@@ -10,8 +10,9 @@ import { ROLES, type Role } from "@/lib/auth/roles";
  * Demo-only role switcher.
  *
  * A real user can never choose their own role — that is the point of having
- * one. This exists so both permission sets can be seen without an auth
- * backend, and it goes away with Supabase Auth. It writes the same cookie the
+ * one. Rendered only when `user.isDemo`, and `setDemoRole` refuses outright
+ * once Supabase is configured, so this cannot become an escalation path if the
+ * render condition is ever loosened by mistake. It writes the same cookie the
  * proxy and the page guards read, so switching exercises the real code path.
  */
 export function RoleSwitcher({ role }: { role: Role }) {

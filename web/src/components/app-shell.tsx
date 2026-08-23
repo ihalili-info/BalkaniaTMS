@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { RoleSwitcher } from "@/components/role-switcher";
+import { signOut } from "@/lib/auth/actions";
 import { Badge, Icon, cx } from "@/components/ui";
 import type { AppUser } from "@/lib/auth/session";
 import { ROLES, groupsFor } from "@/lib/auth/roles";
@@ -162,16 +163,18 @@ function Sidebar({ pathname, user }: { pathname: string; user: AppUser }) {
               {user.fullName}
             </span>
             <span className="truncate text-caption text-rail-ink/70">
-              {ROLES[user.role].label} · {user.depot}
+              {ROLES[user.role].label} · {user.email ?? user.depot}
             </span>
           </span>
-          <button
-            type="button"
-            title="Sign out"
-            className="ml-auto rounded-sm p-1.5 text-rail-ink transition-colors hover:bg-rail-hover hover:text-rail-ink-strong"
-          >
-            <Icon name="logout" className="text-[18px]" />
-          </button>
+          <form action={signOut} className="ml-auto">
+            <button
+              type="submit"
+              title="Sign out"
+              className="rounded-sm p-1.5 text-rail-ink transition-colors hover:bg-rail-hover hover:text-rail-ink-strong"
+            >
+              <Icon name="logout" className="text-[18px]" />
+            </button>
+          </form>
         </div>
 
         {user.isDemo ? <RoleSwitcher role={user.role} /> : null}
