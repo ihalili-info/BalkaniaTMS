@@ -20,6 +20,7 @@ keep it and `supabase/migrations/` in sync.
 ## Structure
 
 - `Project BalkaniaTMS.md` — architecture doc (source of truth for schema/design decisions)
+- `supabase/bootstrap_profiles.sql` — idempotent profile backfill + first-admin bootstrap; run it in the SQL editor if 0004 was applied before its backfill block existed
 - `supabase/migrations/`
   - `0001_init.sql` — DB schema (PostGIS: trucks, orders, loads, load_items, notifications)
   - `0002_truck_details.sql` — dispatcher-owned truck columns (capacity, `features TEXT[]`,
