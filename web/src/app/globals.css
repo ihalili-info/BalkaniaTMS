@@ -1,0 +1,196 @@
+@import "tailwindcss";
+
+/* ============================================================================
+   Balkania TMS — design system
+   Light working canvas + dark navigation rail. Tokens only live here; every
+   component consumes them through Tailwind utilities (bg-surface, text-ink,
+   text-heading, …) so a palette change never needs a component edit.
+   ========================================================================== */
+
+@theme {
+  /* --- Typefaces -----------------------------------------------------------
+     Point at the CSS variables next/font generates in layout.tsx so the
+     self-hosted, optimized Inter / JetBrains Mono are what actually render. */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, monospace;
+
+  /* --- Surfaces (light canvas) --------------------------------------------- */
+  --color-canvas: #f5f7fa;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f2f4f7;
+  --color-surface-sunken: #eaeef3;
+  --color-hairline: #e4e8ee;
+  --color-hairline-strong: #d0d7e0;
+
+  /* --- Ink ------------------------------------------------------------------ */
+  --color-ink: #0e1725;
+  --color-ink-muted: #4c5a6e;
+  --color-ink-subtle: #7b8798;
+  --color-ink-inverse: #ffffff;
+
+  /* --- Navigation rail (dark) ---------------------------------------------- */
+  --color-rail: #0d1520;
+  --color-rail-raised: #16202e;
+  --color-rail-hover: #1b2736;
+  --color-rail-line: #1e2a3a;
+  --color-rail-ink: #9fadbe;
+  --color-rail-ink-strong: #f2f6fb;
+
+  /* --- Brand ---------------------------------------------------------------- */
+  --color-brand: #2f5bd7;
+  --color-brand-hover: #2447b4;
+  --color-brand-soft: #eff3fe;
+  --color-brand-border: #cbd8fa;
+  --color-brand-ink: #1c3d9e;
+
+  /* --- Status: one triplet per state (fg / tinted bg / tint border) --------- */
+  --color-ok: #12855a;
+  --color-ok-soft: #e8f6f0;
+  --color-ok-border: #bfe5d5;
+
+  --color-warn: #a76400;
+  --color-warn-soft: #fdf4e5;
+  --color-warn-border: #f2dcb4;
+
+  --color-danger: #c33227;
+  --color-danger-soft: #fdeeec;
+  --color-danger-border: #f6cec9;
+
+  /* --- Data visualization ---------------------------------------------------
+     Fixed categorical order — slot 1 is the brand hue. Assigned by entity,
+     never by rank, and never cycled. Verified with the dataviz palette
+     validator against the light surface: lightness band, chroma floor,
+     CVD separation (worst adjacent pair dE 12.9 protan), and 3:1 contrast
+     all pass. Re-run the validator before changing any of these. */
+  --color-viz-1: #2f5bd7;
+  --color-viz-2: #c2701c;
+  --color-viz-3: #0f9488;
+  /* Gridlines sit one step off the surface: hairline, solid, recessive. */
+  --color-viz-grid: #eaeef3;
+
+  /* --- Radii ---------------------------------------------------------------- */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* --- Elevation ------------------------------------------------------------ */
+  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.04), 0 1px 3px rgb(16 24 40 / 0.06);
+  --shadow-raised: 0 4px 12px -2px rgb(16 24 40 / 0.08), 0 2px 4px -2px rgb(16 24 40 / 0.06);
+  --shadow-pop: 0 12px 32px -8px rgb(16 24 40 / 0.18);
+
+  /* --- Type scale ----------------------------------------------------------- */
+  --text-display: 28px;
+  --text-display--line-height: 34px;
+  --text-display--letter-spacing: -0.02em;
+  --text-display--font-weight: 600;
+
+  --text-title: 20px;
+  --text-title--line-height: 28px;
+  --text-title--letter-spacing: -0.015em;
+  --text-title--font-weight: 600;
+
+  --text-heading: 15px;
+  --text-heading--line-height: 22px;
+  --text-heading--letter-spacing: -0.01em;
+  --text-heading--font-weight: 600;
+
+  --text-body: 14px;
+  --text-body--line-height: 21px;
+  --text-body--font-weight: 400;
+
+  --text-body-sm: 13px;
+  --text-body-sm--line-height: 19px;
+  --text-body-sm--font-weight: 400;
+
+  --text-caption: 12px;
+  --text-caption--line-height: 17px;
+  --text-caption--font-weight: 400;
+
+  /* Uppercase micro-label — column heads, section eyebrows, status chips. */
+  --text-label: 11px;
+  --text-label--line-height: 14px;
+  --text-label--letter-spacing: 0.06em;
+  --text-label--font-weight: 600;
+
+  /* Big numerals in stat tiles. */
+  --text-metric: 26px;
+  --text-metric--line-height: 32px;
+  --text-metric--letter-spacing: -0.02em;
+  --text-metric--font-weight: 600;
+
+  /* Monospace, for identifiers and coordinates that need to align. */
+  --text-data: 13px;
+  --text-data--line-height: 18px;
+  --text-data--font-weight: 400;
+
+  --text-data-sm: 12px;
+  --text-data-sm--line-height: 16px;
+  --text-data-sm--font-weight: 400;
+
+  /* --- Layout constants ----------------------------------------------------- */
+  --spacing-rail: 15rem; /* sidebar width */
+  --spacing-topbar: 3.5rem; /* header height */
+}
+
+@layer base {
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    overscroll-behavior: none;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Numerals line up in tables and stat tiles without reaching for mono. */
+  table,
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Material Symbols: variable-axis defaults. `.icon-filled` opts into the
+     solid cut, used for the active nav item and status dots. */
+  .material-symbols-outlined {
+    font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+    font-size: 20px;
+    line-height: 1;
+    user-select: none;
+  }
+
+  .icon-filled {
+    font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 24;
+  }
+
+  /* Thin but visible scrollbars — dense tables need a scroll affordance. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-hairline-strong) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--color-hairline-strong);
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+  }
+}

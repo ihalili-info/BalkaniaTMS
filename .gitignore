@@ -1,0 +1,14 @@
+# Root-level ignores. The Next.js app has its own web/.gitignore, which only
+# governs that subtree.
+
+node_modules/
+.DS_Store
+Thumbs.db
+
+# env files anywhere in the tree, except the committed templates
+.env
+.env.*
+!.env.example
+
+# Vercel CLI
+.vercel
