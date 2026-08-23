@@ -53,16 +53,45 @@ const apiBase = (environment: string) =>
 /** Verizon's guidance, in milliseconds. Do not poll a vehicle faster. */
 export const MIN_POLL_INTERVAL_MS = 3 * 60_000;
 
+/**
+ * Verified against the live EU tenant on 2026-08-23:
+ *   GET https://fim.api.eu.fleetmatics.com/token  ->  200, RS256 JWT
+ *   the same call on the `us` host           ->  400 Invalid Login
+ * so the environment segment for this account is `eu`.
+ */
+
 /* --- token ------------------------------------------------------------------
-   `GET /token` with Basic auth returns the token as **plain text**, not JSON,
-   and it expires after 20 minutes. Cached in module scope and refreshed early;
-   on a serverless platform each cold instance fetches its own, which is fine —
-   the alternative is a shared cache for a string that lives 20 minutes. */
+   `GET /token` with Basic auth returns the token as **plain text**, not JSON.
+
+   Verizon's docs say tokens last 20 minutes. Against the live EU tenant they
+   are RS256 JWTs with a 24-hour `exp`, so the documentation is stale. Rather
+   than trust either number, the expiry is read from the token itself and the
+   documented 20 minutes is kept only as the fallback for a token we cannot
+   decode. Refreshing early costs one cheap call; refreshing late costs 401s on
+   real position lookups. */
 
 let cached: { token: string; expiresAt: number } | null = null;
 
-const TOKEN_TTL_MS = 20 * 60_000;
-const REFRESH_MARGIN_MS = 2 * 60_000;
+/** Fallback only, for a token that is not a decodable JWT. */
+const ASSUMED_TTL_MS = 20 * 60_000;
+const REFRESH_MARGIN_MS = 5 * 60_000;
+
+/** Reads `exp` from a JWT without verifying it — we are the holder, not the verifier. */
+function expiryFromJwt(token: string): number | null {
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  try {
+    const payload = JSON.parse(
+      Buffer.from(
+        parts[1].replace(/-/g, "+").replace(/_/g, "/"),
+        "base64",
+      ).toString("utf8"),
+    ) as { exp?: number };
+    return typeof payload.exp === "number" ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function getToken(config: FleetmaticsConfig): Promise<string> {
   const now = Date.now();
@@ -75,8 +104,9 @@ export async function getToken(config: FleetmaticsConfig): Promise<string> {
   const response = await fetch(`${apiBase(config.environment)}/token`, {
     method: "GET",
     headers: {
-      // The app id is deliberately absent here — Verizon documents the Token
-      // API as the one call that does not take it.
+      // The app id is deliberately absent here — the Token API is the one call
+      // that does not take it. Every RAD call afterwards does, and fails 401
+      // with "Required Header Parameter Missing: atmosphere_app_id" without it.
       Authorization: `Basic ${basic}`,
       Accept: "text/plain",
     },
@@ -92,7 +122,11 @@ export async function getToken(config: FleetmaticsConfig): Promise<string> {
   const token = (await response.text()).trim();
   if (token === "") throw new Error("Fleetmatics returned an empty token");
 
-  cached = { token, expiresAt: now + TOKEN_TTL_MS - REFRESH_MARGIN_MS };
+  const exp = expiryFromJwt(token);
+  cached = {
+    token,
+    expiresAt: (exp ?? now + ASSUMED_TTL_MS) - REFRESH_MARGIN_MS,
+  };
   return token;
 }
 
