@@ -5,7 +5,14 @@
 
 import type { Truck, TruckDuty, TruckSignal } from "./types";
 
-/** A fix older than this is shown as stale rather than live. */
+/**
+ * A fix older than this is shown as stale rather than live.
+ *
+ * Sized against the provider: Verizon Connect Reveal pushes on each fix, and
+ * its polling fallback is capped at one call per vehicle every 3-5 minutes. At
+ * 15 minutes a truck has missed roughly three cycles, which is a real fault
+ * rather than a slow update.
+ */
 export const STALE_FIX_MINUTES = 15;
 
 export function truckSignal(truck: Truck, now: Date): TruckSignal {

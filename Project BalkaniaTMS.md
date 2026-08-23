@@ -16,7 +16,7 @@
 | **Authentication** | **Supabase Auth** | Login and role-based access. Two roles in `profiles.role`: `admin` (all modules) and `dispatcher` (all except Integrations), enforced by RLS — see migration 0004. |
 | **Geocoding** | **Google Geocoding API** (or Mapbox) | Converts CRM delivery addresses into `GEOGRAPHY(Point, 4326)` coordinates during order ingestion. |
 | **Communications** | **Twilio** | SMS and WhatsApp Business APIs for triggered dispatch and proximity alerts. |
-| **Telematics / GPS** | **Vehicle GPS API** | Integration via provider webhooks (preferred) or polling cron jobs to track live truck coordinates. |
+| **Telematics / GPS** | **Verizon Connect Reveal** (formerly Fleetmatics) | EU tenant `fim.eu.fleetmatics.com`. GPS webhook push into `/api/webhooks/gps` (Basic auth we set). RAD REST pull is fallback only — no fleet-wide endpoint, and Verizon caps polling at one call per vehicle every 3–5 minutes. |
 | **Tachograph** | **Smart tachograph API** | Reg. (EU) 165/2014. Driver cards and duty time, feeding the Reg. 561/2006 counters on `drivers`. Deliberately separate from the GPS feed — position is not duty. |
 | **Customs** | **Declaration provider** *(not chosen)* | Export/import declarations for GB movements and Windsor Framework lanes for Northern Ireland. |
 
@@ -50,7 +50,8 @@
 * **Status Ownership:** `orders.status` is updated at three points — `assigned` on load assignment, `en_route` when the dispatch confirmation notification is sent, `delivered` when the corresponding `load_items.delivered_at` is set.
 
 ### 2. Live Tracking & Geofencing Engine
-* **GPS Sync:** Preferred path is a provider push webhook (`/api/webhooks/gps`) updating `trucks.current_location` in near real-time. Where only polling is available, a Vercel Cron job polls at its minimum supported interval (1 minute) — sub-minute polling is not achievable on Vercel Cron.
+* **GPS Sync:** Verizon Connect Reveal pushes each fix to `/api/webhooks/gps`, updating `trucks.current_location` in near real-time. The route authenticates with HTTP Basic (credentials we choose and register with Verizon) and guards every write with Reveal's per-vehicle `SequenceId`, because webhook deliveries retry, duplicate and arrive out of order. Polling the RAD API is a fallback only: there is no fleet-wide endpoint, so it costs one HTTP call per truck per cycle, and Verizon asks for no more than one call per vehicle every 3–5 minutes. That provider limit — not Vercel Cron's one-minute floor — is what bounds how fresh a polled position can be.
+* **Identifier:** `trucks.gps_device_id` stores Reveal's **Vehicle Number**, not the device serial. Verizon does not populate that field on account creation; it must be set per vehicle in Reveal first.
 * **Spatial Querying:** Uses PostgreSQL PostGIS functions (`ST_Distance`) to compute distance between trucks and destination stops.
 * **Realtime Dashboard:** Supabase Realtime updates dispatcher maps dynamically without full page reloads.
 
@@ -251,6 +252,6 @@ WHERE l.status = 'active'
 2. **Admin Panel UI:** Built — Active Loads, Orders Queue, Live Fleet Map, Analytics and Integration Settings all render against demo fixtures. Still to design: the Login screen, and a real basemap for the fleet map.
 3. **Claude Coding Workflows:** Use Claude to build Next.js API routes, Supabase client integrations, and Twilio webhooks.
 4. **GPS Integration & Testing:** Connect vehicle GPS API feed to verify spatial distance triggers and messaging routines.
-5. **Tachograph Integration:** Connect the smart tachograph feed so the Reg. 561/2006 counters on `drivers` are real rather than fixtures.
+5. **Tachograph Integration:** Connect a smart tachograph feed so the Reg. 561/2006 counters on `drivers` are real rather than fixtures. **Reveal cannot supply this** — its API offers `PUT Hours of Use` but no way to read tachograph duty, so this needs a separate provider.
 6. **Sign-in:** Build the login screen and swap `getCurrentUser()` in `web/src/lib/auth/session.ts` for the real Supabase session. Everything downstream is already role-aware.
 7. **Customs:** Choose a declaration provider before the first GB or at-risk NI load moves; obtain the EORI number and UKIMS authorisation.

@@ -32,6 +32,8 @@ keep it and `supabase/migrations/` in sync.
     every table**. This is where access control actually lives.
   - `0005_driver_messaging.sql` — `driver_messages`: dispatcher → driver SMS/WhatsApp
     (navigation links). Drivers only, never customers.
+  - `0006_fleetmatics_gps.sql` — `trucks.gps_sequence_id` and `last_known_address`
+    for the Verizon Connect Reveal push feed
 - `web/` — Next.js 16 (App Router, TypeScript, Tailwind v4) admin panel. See
   [web/README.md](web/README.md) for its layout and conventions.
   - `src/app/globals.css` — the entire design system as Tailwind v4 `@theme` tokens
@@ -44,6 +46,8 @@ keep it and `supabase/migrations/` in sync.
   - `src/lib/auth/session.ts` — `getCurrentUser()`; the single seam for Supabase Auth
   - `src/lib/auth/guard.ts` — `requireAccess()` for server-side page checks
   - `src/proxy.ts` — route guard (Next 16 renamed `middleware` → `proxy`)
+  - `src/lib/telematics/fleetmatics.ts` — Verizon Connect Reveal client + GPS push normaliser
+  - `src/app/api/webhooks/gps/route.ts` — the Reveal GPS webhook (Basic auth, replay-guarded)
   - `src/lib/navigation-links.ts` — Waze / Google Maps / Apple Maps deep links + HGV caveats
   - `src/lib/driver-messaging.ts` — driver SMS composition and GSM-7 segment counting
   - `src/lib/csv.ts` — RFC 4180 CSV reader/writer (quotes, BOM, CRLF, delimiter detection)
@@ -92,6 +96,44 @@ equirectangular projection (km units, so the 5 km geofence rings are true to
 scale) — there is no basemap. Choosing and keying a tile provider (Mapbox or
 Google Maps) replaces the `<svg>`; the geofence/route-leg/marker overlays are
 written to carry over.
+
+## GPS provider — Verizon Connect Reveal (Fleetmatics)
+
+The fleet's telematics provider. EU tenant: `fim.eu.fleetmatics.com`, API host
+`https://fim.api.eu.fleetmatics.com`.
+
+**Use the push webhook, not polling.** Reveal POSTs each fix to
+`/api/webhooks/gps`. Two documented limits make polling a poor second: there is
+**no fleet-wide endpoint** (one call per vehicle, per cycle) and Verizon asks
+for **no more than one call per vehicle every 3–5 minutes**.
+
+Auth, and the asymmetry is easy to get wrong:
+
+- **Pull:** `GET /token` with HTTP Basic → a **plain-text** token (not JSON),
+  valid 20 minutes. Subsequent calls send
+  `Authorization: Atmosphere atmosphere_app_id={appId}, Bearer {token}`. The
+  token call is the one request that does *not* take the app id.
+- **Push:** Basic auth on the inbound request, with a username and password
+  **we choose** and hand to Verizon when registering the endpoint. They are not
+  issued by Verizon. Registration is not self-serve — it goes through Reveal
+  (API integrations → SUBMIT ENDPOINTS → GPS webhook) or their support.
+
+`trucks.gps_device_id` holds Reveal's **Vehicle Number** — not the device
+serial or ESN. Verizon does not populate that field automatically; it has to be
+set per vehicle in Reveal or nothing matches.
+
+Webhook deliveries retry, duplicate and arrive out of order, so every write is
+guarded by `SequenceId` (`isNewerFix`). Without it a late delivery overwrites a
+newer position and the truck jumps backwards on the live map. Positions that
+fail validation — no vehicle number, unparseable `UpdateUTC`, or `0,0` null
+island from a device with no fix — are rejected rather than coerced.
+
+The push payload is reverse-geocoded by Verizon, so `last_known_address` comes
+free with every fix.
+
+**Reveal does not solve driver hours.** Its API has `PUT Hours of Use` but no
+way to *read* tachograph duty, so the Reg. 561/2006 counters on `drivers` still
+need a separate tachograph source. Do not wire them to this feed.
 
 ## Messaging: who may be sent what
 
@@ -244,8 +286,10 @@ tracker — `trk-06` in the fixtures is deliberately both.
 - **No login screen.** Roles, guards and RLS policies exist, but nothing
   authenticates: `getCurrentUser()` reads a demo cookie. Supabase Auth plugs
   into that one function — see the worked example in its doc comment.
-- Vercel Cron's floor is 1 minute — GPS sync should prefer a provider push
-  webhook over polling where available.
+- GPS polling is capped by the **provider**, not by Vercel. Verizon asks for no
+  more than one call per vehicle every 3–5 minutes, and there is no fleet-wide
+  endpoint — so polling costs one HTTP call per truck per cycle. Vercel Cron's
+  one-minute floor is no longer the binding constraint; use the push webhook.
 
 ## Conventions
 

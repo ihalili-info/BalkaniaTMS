@@ -34,6 +34,14 @@ export interface Country {
   maxHeightM: number;
   /** Max articulated combination length, m (Directive 96/53/EC Annex I). */
   maxLengthM: number;
+  /**
+   * Rough bounding box [minLat, minLng, maxLat, maxLng].
+   *
+   * Generous on purpose — this is a sanity check on a hand-entered coordinate,
+   * not a border. It exists to catch the two mistakes people actually make:
+   * a transposed lat/lng, and a coordinate pasted for the wrong place.
+   */
+  bbox: [number, number, number, number];
 }
 
 export const COUNTRIES: Record<CountryCode, Country> = {
@@ -50,6 +58,7 @@ export const COUNTRIES: Record<CountryCode, Country> = {
     // clearance standard vehicles are built and routed to.
     maxHeightM: 4.65,
     maxLengthM: 18.75,
+    bbox: [51.3, -10.8, 55.5, -5.3],
   },
   XI: {
     code: "XI",
@@ -62,6 +71,7 @@ export const COUNTRIES: Record<CountryCode, Country> = {
     maxGrossWeightKg: 44_000,
     maxHeightM: 4.95,
     maxLengthM: 18.75,
+    bbox: [53.9, -8.3, 55.4, -5.3],
   },
   GB: {
     code: "GB",
@@ -74,6 +84,7 @@ export const COUNTRIES: Record<CountryCode, Country> = {
     maxGrossWeightKg: 44_000,
     maxHeightM: 4.95,
     maxLengthM: 18.75,
+    bbox: [49.8, -8.3, 61.0, 1.9],
   },
   FR: {
     code: "FR",
@@ -86,6 +97,7 @@ export const COUNTRIES: Record<CountryCode, Country> = {
     maxGrossWeightKg: 44_000,
     maxHeightM: 4.0,
     maxLengthM: 16.5,
+    bbox: [41.2, -5.3, 51.2, 9.7],
   },
   NL: {
     code: "NL",
@@ -98,6 +110,7 @@ export const COUNTRIES: Record<CountryCode, Country> = {
     maxGrossWeightKg: 50_000,
     maxHeightM: 4.0,
     maxLengthM: 18.75,
+    bbox: [50.6, 3.2, 53.7, 7.3],
   },
   DE: {
     code: "DE",
@@ -110,6 +123,7 @@ export const COUNTRIES: Record<CountryCode, Country> = {
     maxGrossWeightKg: 40_000,
     maxHeightM: 4.0,
     maxLengthM: 16.5,
+    bbox: [47.1, 5.7, 55.2, 15.2],
   },
   BE: {
     code: "BE",
@@ -122,6 +136,7 @@ export const COUNTRIES: Record<CountryCode, Country> = {
     maxGrossWeightKg: 44_000,
     maxHeightM: 4.0,
     maxLengthM: 18.75,
+    bbox: [49.4, 2.4, 51.7, 6.5],
   },
 };
 
@@ -140,9 +155,47 @@ export function country(code: CountryCode): Country {
       maxGrossWeightKg: 40_000,
       maxHeightM: 4.0,
       maxLengthM: 16.5,
+      bbox: [-90, -180, 90, 180],
     }
   );
 }
+
+/* --- coordinate sanity ------------------------------------------------------ */
+
+export function isInCountry(point: LatLngLike, code: CountryCode): boolean {
+  const [minLat, minLng, maxLat, maxLng] = country(code).bbox;
+  return (
+    point.lat >= minLat &&
+    point.lat <= maxLat &&
+    point.lng >= minLng &&
+    point.lng <= maxLng
+  );
+}
+
+/**
+ * True when the point is wrong for the country but its mirror image is right —
+ * i.e. lat and lng were entered the wrong way round. Easily the most common
+ * hand-entry mistake, and silently plotting a stop in the Atlantic is worse
+ * than refusing it.
+ */
+export function looksTransposed(
+  point: LatLngLike,
+  code: CountryCode,
+): boolean {
+  return (
+    !isInCountry(point, code) &&
+    isInCountry({ lat: point.lng, lng: point.lat }, code)
+  );
+}
+
+/** Which known country a point falls in, if any — for "did you mean XI?". */
+export function countryForPoint(point: LatLngLike): CountryCode | null {
+  // Northern Ireland sits inside the GB box too, so check it first.
+  const order = ["XI", ...Object.keys(COUNTRIES).filter((c) => c !== "XI")];
+  return order.find((code) => isInCountry(point, code)) ?? null;
+}
+
+type LatLngLike = { lat: number; lng: number };
 
 /* --- customs ---------------------------------------------------------------- */
 

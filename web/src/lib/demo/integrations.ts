@@ -54,13 +54,21 @@ export const connectors: Connector[] = [
   },
   {
     id: "gps",
-    name: "GPS telematics",
-    purpose: "Pushes truck positions into trucks.current_location.",
+    name: "Verizon Connect Reveal",
+    purpose:
+      "Truck positions, pushed per fix. Formerly Fleetmatics; portal at fim.eu.fleetmatics.com.",
     icon: "satellite_alt",
-    status: "not_built",
-    envVars: ["GPS_PROVIDER_API_KEY", "GPS_WEBHOOK_SECRET"],
+    status: "not_configured",
+    envVars: [
+      "FLEETMATICS_ENV",
+      "FLEETMATICS_APP_ID",
+      "FLEETMATICS_USERNAME",
+      "FLEETMATICS_PASSWORD",
+      "GPS_WEBHOOK_USER",
+      "GPS_WEBHOOK_SECRET",
+    ],
     endpoint: "POST /api/webhooks/gps",
-    note: "Prefer the provider push webhook — Vercel Cron cannot poll faster than once a minute.",
+    note: "Webhook route is built and Basic-auth protected. Register the endpoint in Reveal (API integrations -> SUBMIT ENDPOINTS -> GPS webhook); the username and password are ours to choose. Polling is the fallback only: there is no fleet-wide endpoint and Verizon asks for no more than one call per vehicle every 3-5 minutes.",
   },
   {
     id: "tachograph",
@@ -71,7 +79,7 @@ export const connectors: Connector[] = [
     status: "not_built",
     envVars: ["TACHOGRAPH_API_KEY", "TACHOGRAPH_WEBHOOK_SECRET"],
     endpoint: "POST /api/webhooks/tachograph",
-    note: "Reg. (EU) 165/2014. Writes the Reg. 561/2006 counters on drivers. Separate from the GPS feed — position is not duty, and only the tachograph is legal evidence.",
+    note: "Reg. (EU) 165/2014. Writes the Reg. 561/2006 counters on drivers. Still needed: Reveal's API exposes PUT Hours of Use but no way to READ tachograph duty, so driver hours cannot come from the GPS provider.",
   },
   {
     id: "customs",

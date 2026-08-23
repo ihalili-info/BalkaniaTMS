@@ -5,8 +5,10 @@ import { useMemo, useState } from "react";
 import { Badge, Button, Icon, StatTile } from "@/components/ui";
 import { DEMO_NOW } from "@/lib/demo/fleet";
 import { relativeTime } from "@/lib/format";
-import type { Order } from "@/lib/types";
+import type { CountryCode } from "@/lib/regions";
+import type { LatLng, Order } from "@/lib/types";
 
+import { FixAddressesDialog } from "./fix-addresses-dialog";
 import { ImportDialog } from "./import-dialog";
 import { OrdersTable } from "./orders-table";
 
@@ -28,6 +30,10 @@ export function OrdersWorkspace({
   const [importedIds, setImportedIds] = useState<Set<string>>(new Set());
   const [dialogOpen, setDialogOpen] = useState(false);
   const [lastImport, setLastImport] = useState<number | null>(null);
+  const [fixing, setFixing] = useState<{ startWith: string | null } | null>(
+    null,
+  );
+  const [lastFixed, setLastFixed] = useState<string | null>(null);
 
   const stats = useMemo(() => {
     const unassigned = orders.filter((o) => !loadRefByOrderId[o.id]);
@@ -48,6 +54,34 @@ export function OrdersWorkspace({
     () => new Set(orders.map((o) => o.crm_order_id)),
     [orders],
   );
+
+  /**
+   * Where a corrected address lands. Local state today; wiring Supabase means
+   * an `update(...).eq("id", id)` here and nothing else changes.
+   */
+  const handleFix = (
+    orderId: string,
+    patch: {
+      delivery_address: string;
+      delivery_postcode: string | null;
+      delivery_country: CountryCode;
+      delivery_location: LatLng;
+    },
+  ) => {
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === orderId
+          ? { ...o, ...patch, updated_at: DEMO_NOW.toISOString() }
+          : o,
+      ),
+    );
+    const fixed = orders.find((o) => o.id === orderId);
+    setLastFixed(fixed?.crm_order_id ?? null);
+
+    // Stay open while there is more to fix; the list shrinks under us.
+    const remaining = stats.ungeocoded.filter((o) => o.id !== orderId);
+    setFixing(remaining.length > 0 ? { startWith: remaining[0].id } : null);
+  };
 
   const handleImport = (incoming: Order[]) => {
     // Newest first, matching the queue's own ordering.
@@ -104,6 +138,22 @@ export function OrdersWorkspace({
         />
       </div>
 
+      {lastFixed ? (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-ok-border bg-ok-soft px-4 py-3">
+          <Icon name="edit_location_alt" className="text-[20px] text-ok" />
+          <p className="min-w-0 flex-1 text-body-sm text-ink">
+            <span className="font-mono text-data-sm">{lastFixed}</span> now has
+            coordinates.{" "}
+            <span className="text-ink-muted">
+              It will appear on the fleet map and can be routed to.
+            </span>
+          </p>
+          <Button variant="ghost" onClick={() => setLastFixed(null)}>
+            Dismiss
+          </Button>
+        </div>
+      ) : null}
+
       {lastImport !== null ? (
         <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-ok-border bg-ok-soft px-4 py-3">
           <Icon name="task_alt" className="text-[20px] text-ok" />
@@ -138,8 +188,12 @@ export function OrdersWorkspace({
                 : ""}
             </p>
           </div>
-          <Button variant="danger" icon="edit_location_alt">
-            Fix addresses
+          <Button
+            variant="danger"
+            icon="edit_location_alt"
+            onClick={() => setFixing({ startWith: stats.ungeocoded[0].id })}
+          >
+            Fix {stats.ungeocoded.length === 1 ? "address" : "addresses"}
           </Button>
         </div>
       ) : null}
@@ -168,7 +222,17 @@ export function OrdersWorkspace({
         orders={orders}
         loadRefByOrderId={loadRefByOrderId}
         importedIds={importedIds}
+        onFixAddress={(id) => setFixing({ startWith: id })}
       />
+
+      {fixing ? (
+        <FixAddressesDialog
+          orders={stats.ungeocoded}
+          startWith={fixing.startWith}
+          onSave={handleFix}
+          onClose={() => setFixing(null)}
+        />
+      ) : null}
 
       {dialogOpen ? (
         <ImportDialog

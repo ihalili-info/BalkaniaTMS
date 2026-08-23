@@ -36,11 +36,13 @@ export function OrdersTable({
   orders,
   loadRefByOrderId,
   importedIds,
+  onFixAddress,
 }: {
   orders: Order[];
   loadRefByOrderId: Record<string, string>;
   /** Ids added by CSV import this session — marked so they are traceable. */
   importedIds?: Set<string>;
+  onFixAddress?: (orderId: string) => void;
 }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
@@ -212,9 +214,14 @@ export function OrdersTable({
                       </span>
                     ) : null}
                     {ungeocoded ? (
-                      <Badge tone="danger" className="mt-1">
-                        No coordinates
-                      </Badge>
+                      <button
+                        type="button"
+                        onClick={() => onFixAddress?.(order.id)}
+                        className="mt-1 inline-flex items-center gap-1 rounded-full border border-danger-border bg-danger-soft px-2 py-0.5 font-mono text-label uppercase text-danger transition-colors hover:bg-danger hover:text-ink-inverse"
+                      >
+                        <Icon name="edit_location_alt" className="text-[12px]" />
+                        Fix address
+                      </button>
                     ) : null}
                   </Td>
                   <Td>

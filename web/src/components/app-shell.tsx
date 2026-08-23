@@ -8,9 +8,21 @@ import { RoleSwitcher } from "@/components/role-switcher";
 import { Badge, Icon, cx } from "@/components/ui";
 import type { AppUser } from "@/lib/auth/session";
 import { ROLES, groupsFor } from "@/lib/auth/roles";
-import { activeLoads, trucks, unassignedOrders } from "@/lib/demo/fleet";
+import { DEMO_NOW, activeLoads, trucks, unassignedOrders } from "@/lib/demo/fleet";
+import { relativeTime } from "@/lib/format";
 
 const onlineTrucks = trucks.filter((t) => t.current_location !== null).length;
+
+/**
+ * Freshest position in the fleet. Derived, not asserted — the header used to
+ * claim a hardcoded "1 min ago", which would have gone on saying that with a
+ * dead feed.
+ */
+const newestFix = trucks
+  .filter((t) => t.current_location !== null)
+  .map((t) => t.location_updated_at)
+  .sort()
+  .at(-1);
 
 /** Trucks a dispatcher has taken out of the pool — worth seeing from any page. */
 const outOfService = trucks.filter(
@@ -190,8 +202,11 @@ function Topbar() {
           <span className="font-mono text-label uppercase text-ink-subtle">
             GPS sync
           </span>
-          <span className="font-mono text-data-sm text-ok">
-            live · 1 min ago
+          <span
+            className="font-mono text-data-sm text-ok"
+            title="Verizon Connect Reveal GPS webhook"
+          >
+            {newestFix ? relativeTime(newestFix, DEMO_NOW) : "no fixes"}
           </span>
         </div>
 
