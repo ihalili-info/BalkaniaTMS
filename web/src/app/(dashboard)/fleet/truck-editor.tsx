@@ -60,6 +60,7 @@ export function TruckEditor({
 }) {
   const [label, setLabel] = useState(truck.label ?? "");
   const [makeModel, setMakeModel] = useState(truck.make_model ?? "");
+  const [gpsDeviceId, setGpsDeviceId] = useState(truck.gps_device_id);
   const [kg, setKg] = useState(truck.capacity_kg?.toString() ?? "");
   const [m3, setM3] = useState(truck.capacity_m3?.toString() ?? "");
   const [pallets, setPallets] = useState(truck.pallet_slots?.toString() ?? "");
@@ -118,6 +119,7 @@ export function TruckEditor({
     onSave({
       label: toNullableText(label),
       make_model: toNullableText(makeModel),
+      gps_device_id: gpsDeviceId.trim(),
       capacity_kg: toNullableInt(kg),
       capacity_m3: toNullableNum(m3),
       pallet_slots: toNullableInt(pallets),
@@ -485,6 +487,25 @@ export function TruckEditor({
             ) : null}
           </section>
 
+          <section>
+            <h3 className="mb-1 text-heading text-ink">GPS matching</h3>
+            <p className="mb-3 text-caption text-ink-subtle">
+              Reveal&rsquo;s Vehicle Number, not the device serial or ESN.
+              Verizon never sets this on its own — it has to match what is
+              entered for this vehicle in Reveal, or the GPS webhook has
+              nothing to match the incoming fix against.
+            </p>
+            <Field label="GPS device ID" htmlFor="gps-device-id">
+              <input
+                id="gps-device-id"
+                className={controlClass}
+                value={gpsDeviceId}
+                onChange={(e) => setGpsDeviceId(e.target.value)}
+                placeholder="e.g. 10234"
+              />
+            </Field>
+          </section>
+
           {/* Owned by the telematics feed, so read-only here. Showing it makes
               the ownership split visible instead of implied. */}
           <section className="rounded-md border border-hairline bg-surface-muted px-3 py-3">
@@ -493,7 +514,6 @@ export function TruckEditor({
             </p>
             <dl className="space-y-1.5">
               {[
-                ["Device", truck.gps_device_id],
                 ["Position", formatCoords(truck.current_location)],
                 [
                   "Last fix",
@@ -512,7 +532,13 @@ export function TruckEditor({
         </div>
 
         <footer className="flex items-center gap-2 border-t border-hairline px-5 py-3">
-          <Button variant="primary" icon="save" onClick={save} className="flex-1 justify-center">
+          <Button
+            variant="primary"
+            icon="save"
+            onClick={save}
+            disabled={gpsDeviceId.trim() === ""}
+            className="flex-1 justify-center"
+          >
             Save changes
           </Button>
           <Button onClick={onClose}>Cancel</Button>

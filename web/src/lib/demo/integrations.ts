@@ -101,20 +101,20 @@ export const connectors: Connector[] = [
     note: "Google Geocoding or Mapbox; no provider chosen yet.",
   },
   {
-    id: "twilio-sms",
-    name: "Twilio SMS",
+    id: "sent-sms",
+    name: "Sent SMS",
     purpose: "Dispatch, proximity and delivery alerts over SMS.",
     icon: "sms",
     status: "not_configured",
-    envVars: ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_SMS_FROM"],
+    envVars: ["SENT_DM_API_KEY", "SENT_SENDER_ID"],
   },
   {
-    id: "twilio-whatsapp",
-    name: "Twilio WhatsApp",
+    id: "sent-whatsapp",
+    name: "Sent WhatsApp",
     purpose: "The same alerts over WhatsApp Business, where the customer prefers it.",
     icon: "chat",
     status: "not_configured",
-    envVars: ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM"],
+    envVars: ["SENT_DM_API_KEY", "SENT_SENDER_ID"],
   },
 ];
 
@@ -167,7 +167,7 @@ export const privacySettings: PrivacySetting[] = [
   {
     id: "processors",
     label: "Processors",
-    value: "Twilio, Supabase, Vercel",
+    value: "Sent (sent.dm), Supabase, Vercel",
     basis:
       "Each needs a data processing agreement. Check the transfer mechanism for any processing outside the EEA.",
     icon: "handshake",
@@ -175,9 +175,9 @@ export const privacySettings: PrivacySetting[] = [
   {
     id: "residency",
     label: "Data residency",
-    value: "EU region — not yet pinned",
+    value: "Compute in dub1 — database not yet pinned",
     basis:
-      "Provision Supabase in an EU region. UK customer data may also move under the UK GDPR adequacy decision.",
+      "Vercel functions are pinned to Dublin (dub1) in vercel.json; the default would have been iad1 in the US. Supabase must still be provisioned in an EU region. UK customer data may also move under the UK GDPR adequacy decision.",
     icon: "database",
   },
 ];

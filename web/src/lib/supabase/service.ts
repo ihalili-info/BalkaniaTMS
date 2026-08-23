@@ -1,3 +1,8 @@
+// Build-time guard, not a convention: importing this file from a Client
+// Component now fails the build instead of shipping SUPABASE_SERVICE_ROLE_KEY
+// — a key that bypasses every RLS policy in migration 0004 — to the browser.
+import "server-only";
+
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 /**

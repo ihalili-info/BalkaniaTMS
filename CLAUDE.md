@@ -2,7 +2,7 @@
 
 Smart logistics dispatch platform: syncs orders from a CRM, tracks trucks via
 GPS/telematics, geofences delivery stops, and sends automated SMS/WhatsApp
-customer alerts via Twilio.
+customer alerts via Sent (sent.dm).
 
 **The operation is Ireland-based** — Dublin (Ballymount) depot — running
 domestic work plus cross-border into Northern Ireland, Great Britain and
@@ -60,7 +60,7 @@ keep it and `supabase/migrations/` in sync.
   - `src/lib/types.ts` — row types mirroring the migration
   - `src/lib/demo/` — fixtures every page currently renders from
   - `src/lib/supabase/` — `client.ts` (browser), `server.ts` (RSC/route handlers, cookie-based), `service.ts` (service-role, server-only, bypasses RLS — for webhooks/cron)
-  - `.env.example` — required env vars (Supabase, Twilio, geocoding, GPS provider); copy to `.env.local` and fill in
+  - `.env.example` — required env vars (Supabase, Sent, geocoding, GPS provider); copy to `.env.local` and fill in
 
 ## Design system
 
@@ -267,8 +267,12 @@ most of the mainland 4.00 m — so a legal Irish trailer can be illegal in Franc
 `trucks` has two writers, and the split is load-bearing:
 
 - The **telematics feed** owns `current_location` / `location_updated_at`.
-- **Dispatchers** own label, capacity, `features` and `availability`, stamped
-  with `details_updated_at`.
+- **Dispatchers** own label, capacity, `features`, `availability` and
+  `gps_device_id`, stamped with `details_updated_at`. `gps_device_id` looks
+  telematics-owned but isn't: Verizon never sets Reveal's Vehicle Number on
+  its own, so a dispatcher has to type it in here to match what's entered for
+  that vehicle in Reveal — the Fleet editor's "GPS matching" field, not the
+  read-only feed block.
 
 Never let a dispatcher edit bump the location timestamp — a stale fix would
 start looking fresh on the live map. That is why 0002 renamed the column.
@@ -291,9 +295,26 @@ tracker — `trk-06` in the fixtures is deliberately both.
   endpoint — so polling costs one HTTP call per truck per cycle. Vercel Cron's
   one-minute floor is no longer the binding constraint; use the push webhook.
 
+## Deployment (Vercel)
+
+The Vercel project's **Root Directory is `web`**, so `web/vercel.json` — not a
+file at the repo root — is the config Vercel reads.
+
+**Functions are pinned to `dub1` (Dublin).** Vercel defaults new projects to
+`iad1` in Virginia; leaving it there would route every customer name, phone
+number and delivery address through US compute and add a transatlantic hop to
+every Supabase query. Pin the Supabase project to an EU region as well — the
+region setting only covers compute. `proxy.ts` is Routing Middleware and runs
+in all regions regardless, which is fine: it reads a cookie and redirects,
+touching no personal data.
+
+No cron entry yet — `/api/cron/gps` does not exist, and the push webhook is the
+preferred path anyway.
+
 ## Conventions
 
-- No git repo initialized at the root yet.
+- Git repo root is this directory, remote `origin` is
+  `github.com/ihalili-info/BalkaniaTMS`, default branch `main`.
 - Google Stitch is no longer part of the workflow. The old Stitch exports were
   deleted and their tokens superseded by the design system above — don't
   re-export from Stitch or recreate those folders; extend `globals.css` and

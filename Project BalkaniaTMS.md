@@ -15,7 +15,7 @@
 | **Backend & Database** | **Supabase** | PostgreSQL database with **PostGIS** extension for geospatial calculations, webhooks, and real-time state updates. |
 | **Authentication** | **Supabase Auth** | Login and role-based access. Two roles in `profiles.role`: `admin` (all modules) and `dispatcher` (all except Integrations), enforced by RLS — see migration 0004. |
 | **Geocoding** | **Google Geocoding API** (or Mapbox) | Converts CRM delivery addresses into `GEOGRAPHY(Point, 4326)` coordinates during order ingestion. |
-| **Communications** | **Twilio** | SMS and WhatsApp Business APIs for triggered dispatch and proximity alerts. |
+| **Communications** | **Sent** (sent.dm) | Unified SMS/WhatsApp/RCS API for triggered dispatch and proximity alerts. |
 | **Telematics / GPS** | **Verizon Connect Reveal** (formerly Fleetmatics) | EU tenant `fim.eu.fleetmatics.com`. GPS webhook push into `/api/webhooks/gps` (Basic auth we set). RAD REST pull is fallback only — no fleet-wide endpoint, and Verizon caps polling at one call per vehicle every 3–5 minutes. |
 | **Tachograph** | **Smart tachograph API** | Reg. (EU) 165/2014. Driver cards and duty time, feeding the Reg. 561/2006 counters on `drivers`. Deliberately separate from the GPS feed — position is not duty. |
 | **Customs** | **Declaration provider** *(not chosen)* | Export/import declarations for GB movements and Windsor Framework lanes for Northern Ireland. |
@@ -34,7 +34,7 @@
                                                   (Geofence Calculation)
                                                              |
                                                              v
-[ Twilio API ] <--- ( Supabase Webhook / Edge Function ) ----+---> [ WhatsApp / SMS Alert ]
+[ Sent API ] <--- ( Supabase Webhook / Edge Function ) ------+---> [ WhatsApp / SMS Alert ]
 ```
 
 ---
@@ -60,7 +60,7 @@
 * **Not equivalent:** only Google Maps accepts a multi-stop URL (nine waypoints). Waze and Apple Maps take a single destination and therefore receive the *next* stop, not the last. Each link states its coverage.
 * **Consumer navigators, not HGV routing:** none applies height, weight or ADR restrictions. A 4.62 m Irish trailer is legal at home and over the 4.00 m limit across most of the continent, so the warning is shown at the point of handoff. Proper truck routing needs an HGV-aware routing API — an open item alongside ETA-based geofencing.
 
-### 4. Automated Client Alerts (Twilio)
+### 4. Automated Client Alerts (Sent)
 * **Scope — customer messaging is closed:** the three types below are the *only* messages a customer receives. There is no dispatcher-initiated customer SMS and no public tracking link; both would create a new exposure of a customer's address for no operational gain. Driver messaging is a separate table and a separate channel.
 * **Trigger Conditions (v1):** Fires when a truck is within $5\text{ km}$ of the destination stop (straight-line PostGIS distance). Time-based triggering ($\le 15\text{ minutes}$ ETA) requires a routing/ETA API and is a v2 consideration — straight-line distance is not a reliable proxy for drive time.
 * **Notification Types** (logged individually in the `notifications` table so each can fire independently per order):
@@ -250,7 +250,7 @@ WHERE l.status = 'active'
 
 1. **Setup Core Stack:** Provision Vercel project and Supabase instance (enable PostGIS, apply migrations 0001–0004, obtain a geocoding API key).
 2. **Admin Panel UI:** Built — Active Loads, Orders Queue, Live Fleet Map, Analytics and Integration Settings all render against demo fixtures. Still to design: the Login screen, and a real basemap for the fleet map.
-3. **Claude Coding Workflows:** Use Claude to build Next.js API routes, Supabase client integrations, and Twilio webhooks.
+3. **Claude Coding Workflows:** Use Claude to build Next.js API routes, Supabase client integrations, and Sent webhooks.
 4. **GPS Integration & Testing:** Connect vehicle GPS API feed to verify spatial distance triggers and messaging routines.
 5. **Tachograph Integration:** Connect a smart tachograph feed so the Reg. 561/2006 counters on `drivers` are real rather than fixtures. **Reveal cannot supply this** — its API offers `PUT Hours of Use` but no way to read tachograph duty, so this needs a separate provider.
 6. **Sign-in:** Build the login screen and swap `getCurrentUser()` in `web/src/lib/auth/session.ts` for the real Supabase session. Everything downstream is already role-aware.

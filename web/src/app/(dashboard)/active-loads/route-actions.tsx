@@ -46,8 +46,8 @@ export function RouteActions({ load }: { load: LoadView }) {
           load={load}
           onClose={() => setOpen(false)}
           onSend={({ channel, to }) => {
-            // The single seam for Twilio. Today it records locally; wiring it
-            // up means POSTing to a route handler that sends via Twilio and
+            // The single seam for Sent. Today it records locally; wiring it
+            // up means POSTing to a route handler that sends via Sent and
             // inserts a `driver_messages` row (migration 0005).
             setSent({ channel, to });
             setOpen(false);

@@ -121,24 +121,40 @@ page. Everything downstream is already role-aware. Take the role from
 The app builds clean and has no runtime that Vercel can't host, and no module
 reads an env var at import time, so a build succeeds even with nothing
 configured. Module routes are server-rendered rather than static, because the
-role guard reads cookies — that is expected, not a regression. Two things need
+role guard reads cookies — that is expected, not a regression. Three things need
 saying:
 
 1. **Set the Vercel project's Root Directory to `web`.** The repo root holds the
    architecture doc and `supabase/`; the Next.js app is one level down. Without
-   this, the build finds no `package.json`.
-2. **The repo root is not a git repository yet.** Vercel's Git integration needs
-   one (`git init` at the project root, then push to a remote). `vercel deploy`
-   from the CLI works without it.
+   this, the build finds no `package.json`. `vercel.json` lives here in `web/`
+   for the same reason — Vercel reads it from the root directory, not the repo
+   root.
+2. **Import from GitHub.** The repo root is a git repository with `origin` at
+   `github.com/ihalili-info/BalkaniaTMS`, `main` as the default branch — Vercel's
+   "Import Project" can point at it directly. `vercel deploy` from the CLI also
+   works, and will prompt for the root directory on first `vercel link`.
+3. **Functions run in `dub1` (Dublin).** Set in `vercel.json`, and not cosmetic.
+   Vercel defaults every new project to `iad1` (Washington DC), which would put
+   customer names, phone numbers and delivery addresses through US compute on
+   every request — an EEA transfer the GDPR section of the architecture doc does
+   not budget for — and would add a transatlantic round trip to every Supabase
+   query. Provision Supabase in an EU region too, or the region pinning only
+   solves half of it. `dub1` is a single region, so it is within the Hobby plan
+   limit.
 
 Then add the `.env.example` variables as Vercel Environment Variables. Only the
 `NEXT_PUBLIC_*` pair is exposed to the browser; keep
-`SUPABASE_SERVICE_ROLE_KEY`, the Twilio credentials and the webhook secrets
+`SUPABASE_SERVICE_ROLE_KEY`, the Sent credentials and the webhook secrets
 server-only.
+
+Note that **Routing Middleware — our `proxy.ts` — is deployed to all regions
+regardless of the `regions` setting.** That is fine here: it reads a cookie and
+either continues or redirects, so it touches no personal data and reaches no
+database.
 
 ### Not yet needed, but coming
 
-- **`vercel.json` with a cron entry** for GPS polling, once `/api/cron/gps`
+- **A cron entry in `vercel.json`** for GPS polling, once `/api/cron/gps`
   exists. Deliberately not added yet — a cron pointed at a route that doesn't
   exist just fails on a schedule. Note the platform floor of one minute; prefer
   the provider's push webhook where it is offered.

@@ -140,7 +140,7 @@ export default function AnalyticsPage() {
 
       <div className="grid gap-4 xl:grid-cols-[20rem_1fr]">
         <Card>
-          <CardHeader title="Alerts by type" hint="Twilio sends, last 14 days" />
+          <CardHeader title="Alerts by type" hint="Sent sends, last 14 days" />
           <CardBody>
             <CategoryBars items={alertCategories} unit="Sent" />
           </CardBody>

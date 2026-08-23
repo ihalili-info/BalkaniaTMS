@@ -31,7 +31,7 @@ CREATE TABLE driver_messages (
   sent_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
   sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-  -- Twilio's message SID and the last delivery receipt it reported.
+  -- Sent's message id and the last delivery receipt it reported.
   provider_sid TEXT,
   status TEXT NOT NULL DEFAULT 'queued'
     CHECK (status IN ('queued', 'sent', 'delivered', 'undelivered', 'failed')),
@@ -63,5 +63,5 @@ CREATE POLICY driver_messages_send ON driver_messages
   FOR INSERT TO authenticated
   WITH CHECK (sent_by = auth.uid());
 
--- Delivery receipts arrive on a Twilio status webhook with no user session, so
+-- Delivery receipts arrive on a Sent status webhook with no user session, so
 -- the service role updates `status`. It bypasses RLS by design.

@@ -362,7 +362,7 @@ export default function ActiveLoadsPage() {
         <StatTile
           label="Alerts sent today"
           value={alertsToday.length}
-          hint="SMS and WhatsApp, via Twilio"
+          hint="SMS and WhatsApp, via Sent"
           icon="forum"
           tone="ok"
         />
