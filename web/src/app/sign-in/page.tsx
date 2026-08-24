@@ -21,14 +21,13 @@ export default async function SignInPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-canvas px-6">
       <div className="w-full max-w-sm">
-        <div className="mb-6 flex items-center gap-2.5">
+        {/* The full lockup needs room — below about 64px the vertical TMS in
+            the ribbon stops being legible. Here it has it. */}
+        <div className="mb-7 flex flex-col items-center text-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.svg" alt="" width={40} height={40} className="size-10" />
-          <span className="flex flex-col leading-none">
-            <span className="text-heading tracking-tight text-ink">Balkania</span>
-            <span className="mt-0.5 font-mono text-label uppercase text-accent">
-              TMS
-            </span>
+          <img src="/logo.svg" alt="" width={96} height={96} className="size-24" />
+          <span className="mt-3 text-title tracking-tight text-ink">
+            Balkania TMS
           </span>
         </div>
 

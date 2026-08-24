@@ -21,18 +21,48 @@ export interface ShellStats {
   newestFix: string | null;
 }
 
-function BrandMark() {
+/**
+ * Compact mark, for the rail.
+ *
+ * Not the full lockup. Two reasons it has to be a different drawing:
+ *
+ *  · At 32px the vertical "TMS" in the ribbon is about three pixels tall —
+ *    illegible, and it reads as dirt on the glyph. The wordmark beside it
+ *    already says TMS, so the lettering is redundant here anyway.
+ *  · The brand navy sits at 1.17:1 against the rail. Invisible. On dark the
+ *    B is drawn in white (≈17:1) with the violet carrying the brand.
+ *
+ * Inline rather than a file because it has to change colour with its
+ * surroundings, which an <img> cannot do.
+ */
+function BrandMark({ tone = "dark" }: { tone?: "dark" | "light" }) {
+  const letter = tone === "dark" ? "#FFFFFF" : "var(--color-brand)";
+  const accent = tone === "dark" ? "var(--color-accent-rail)" : "var(--color-accent)";
+
   return (
-    // Plain <img>: the mark is a static SVG in /public, so next/image would
-    // add a request round-trip and a layout wrapper for no benefit.
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src="/logo.svg"
-      alt=""
-      width={34}
-      height={34}
-      className="size-[34px] shrink-0"
-    />
+    <svg
+      viewBox="0 0 104 104"
+      className="size-8 shrink-0"
+      role="img"
+      aria-label="Balkania TMS"
+    >
+      {/* ribbon, reduced to its silhouette */}
+      <path fill={accent} d="M30 8 L12 15 C7 17 5 21 5 26 L5 70 L30 70 Z" />
+      {/* drop */}
+      <path
+        fill={accent}
+        d="M30 68 L30 86 C34 89 40 91 46 92 C38 96 28 96 22 93 A15 15 0 1 1 30 68 Z"
+      />
+      {/* B */}
+      <path
+        fill={letter}
+        fillRule="evenodd"
+        d="M34 6 L64 6 C82 6 91 14 91 26 C91 35 85 41 76 43
+           C87 46 95 54 95 65 C95 78 83 82 63 82 L34 82 Z
+           M52 20 L52 37 L63 37 C71 37 75 34 75 29 C75 23 71 20 63 20 Z
+           M52 51 L52 68 L65 68 C74 68 79 65 79 59 C79 54 74 51 65 51 Z"
+      />
+    </svg>
   );
 }
 
@@ -54,7 +84,7 @@ function Sidebar({
   return (
     <aside className="fixed inset-y-0 left-0 z-50 flex w-rail flex-col bg-rail">
       <div className="flex h-topbar items-center gap-2.5 border-b border-rail-line px-4">
-        <BrandMark />
+        <BrandMark tone="dark" />
         <span className="flex min-w-0 flex-col leading-none">
           <span className="truncate text-heading tracking-tight text-rail-ink-strong">
             Balkania
