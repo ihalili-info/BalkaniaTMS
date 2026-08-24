@@ -4,41 +4,22 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
-import { RoleSwitcher } from "@/components/role-switcher";
 import { signOut } from "@/lib/auth/actions";
-import { Badge, Icon, cx } from "@/components/ui";
+import { Icon, cx } from "@/components/ui";
+import { relativeTime } from "@/lib/format";
 import type { AppUser } from "@/lib/auth/session";
 import { ROLES, groupsFor } from "@/lib/auth/roles";
-import { DEMO_NOW, activeLoads, trucks, unassignedOrders } from "@/lib/demo/fleet";
-import { relativeTime } from "@/lib/format";
 
-const onlineTrucks = trucks.filter((t) => t.current_location !== null).length;
-
-/**
- * Freshest position in the fleet. Derived, not asserted — the header used to
- * claim a hardcoded "1 min ago", which would have gone on saying that with a
- * dead feed.
- */
-const newestFix = trucks
-  .filter((t) => t.current_location !== null)
-  .map((t) => t.location_updated_at)
-  .sort()
-  .at(-1);
-
-/** Trucks a dispatcher has taken out of the pool — worth seeing from any page. */
-const outOfService = trucks.filter(
-  (t) => t.availability !== "available",
-).length;
-
-/**
- * Badge numbers, keyed by module id. The modules themselves — and which roles
- * may see them — live in `lib/auth/roles.ts`; this only decorates them.
- */
-const COUNTS: Record<string, { value: number; tone?: "warn" } | undefined> = {
-  "active-loads": { value: activeLoads.length },
-  "orders-queue": { value: unassignedOrders.length },
-  fleet: { value: outOfService, tone: "warn" },
-};
+/** Live figures for the rail, resolved server-side and passed down. */
+export interface ShellStats {
+  activeLoads: number;
+  unassignedOrders: number;
+  outOfService: number;
+  trucksOnline: number;
+  trucksTotal: number;
+  /** ISO timestamp of the freshest GPS fix, or null when there are none. */
+  newestFix: string | null;
+}
 
 function BrandMark() {
   return (
@@ -58,7 +39,21 @@ function BrandMark() {
   );
 }
 
-function Sidebar({ pathname, user }: { pathname: string; user: AppUser }) {
+function Sidebar({
+  pathname,
+  user,
+  stats,
+}: {
+  pathname: string;
+  user: AppUser;
+  stats: ShellStats;
+}) {
+  const counts: Record<string, { value: number; tone?: "warn" } | undefined> = {
+    "active-loads": { value: stats.activeLoads },
+    "orders-queue": { value: stats.unassignedOrders },
+    fleet: { value: stats.outOfService, tone: "warn" },
+  };
+
   return (
     <aside className="fixed inset-y-0 left-0 z-50 flex w-rail flex-col bg-rail">
       <div className="flex h-topbar items-center gap-2.5 border-b border-rail-line px-4">
@@ -84,7 +79,7 @@ function Sidebar({ pathname, user }: { pathname: string; user: AppUser }) {
             <ul className="space-y-0.5">
               {modules.map((item) => {
                 const active = pathname.startsWith(item.href);
-                const count = COUNTS[item.id];
+                const count = counts[item.id];
                 return (
                   <li key={item.href}>
                     <Link
@@ -139,18 +134,20 @@ function Sidebar({ pathname, user }: { pathname: string; user: AppUser }) {
               Fleet online
             </span>
             <span className="font-mono text-data-sm tabular text-rail-ink-strong">
-              {onlineTrucks}/{trucks.length}
+              {stats.trucksOnline}/{stats.trucksTotal}
             </span>
           </div>
           <div className="mt-2 h-1 overflow-hidden rounded-full bg-rail">
             <div
               className="h-full rounded-full bg-ok"
-              style={{ width: `${(onlineTrucks / trucks.length) * 100}%` }}
+              style={{
+                width: `${stats.trucksTotal === 0 ? 0 : (stats.trucksOnline / stats.trucksTotal) * 100}%`,
+              }}
             />
           </div>
         </div>
 
-        <div className="mb-2 flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5">
           <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-rail-hover text-caption font-medium text-rail-ink-strong">
             {user.fullName
               .split(" ")
@@ -177,13 +174,12 @@ function Sidebar({ pathname, user }: { pathname: string; user: AppUser }) {
           </form>
         </div>
 
-        {user.isDemo ? <RoleSwitcher role={user.role} /> : null}
       </div>
     </aside>
   );
 }
 
-function Topbar() {
+function Topbar({ stats }: { stats: ShellStats }) {
   return (
     <header className="fixed inset-x-0 left-rail top-0 z-40 flex h-topbar items-center gap-4 border-b border-hairline bg-surface/85 px-6 backdrop-blur-md">
       <label className="flex h-9 w-full max-w-md items-center gap-2 rounded-sm border border-hairline bg-surface-muted px-3 focus-within:border-brand-border focus-within:bg-surface">
@@ -196,11 +192,6 @@ function Topbar() {
       </label>
 
       <div className="ml-auto flex items-center gap-3">
-        {/* Honest signal: nothing here is talking to Supabase yet. */}
-        <Badge tone="warn" dot>
-          Demo data
-        </Badge>
-
         <div className="hidden flex-col items-end border-r border-hairline pr-3 lg:flex">
           <span className="font-mono text-label uppercase text-ink-subtle">
             GPS sync
@@ -209,7 +200,9 @@ function Topbar() {
             className="font-mono text-data-sm text-ok"
             title="Verizon Connect Reveal GPS webhook"
           >
-            {newestFix ? relativeTime(newestFix, DEMO_NOW) : "no fixes"}
+            {stats.newestFix
+              ? relativeTime(stats.newestFix, new Date())
+              : "no fixes yet"}
           </span>
         </div>
 
@@ -228,17 +221,19 @@ function Topbar() {
 
 export function AppShell({
   user,
+  stats,
   children,
 }: {
   user: AppUser;
+  stats: ShellStats;
   children: ReactNode;
 }) {
   const pathname = usePathname() ?? "";
 
   return (
     <div className="min-h-screen bg-canvas">
-      <Sidebar pathname={pathname} user={user} />
-      <Topbar />
+      <Sidebar pathname={pathname} user={user} stats={stats} />
+      <Topbar stats={stats} />
       <main className="pl-rail pt-topbar">{children}</main>
     </div>
   );

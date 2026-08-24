@@ -1,12 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
 
-import { DEMO_ROLE_COOKIE, isRole } from "./roles";
 import { isSupabaseConfigured } from "./session";
 
 export interface SignInState {
@@ -50,37 +48,8 @@ export async function signIn(
 }
 
 export async function signOut(): Promise<void> {
-  if (isSupabaseConfigured()) {
-    const supabase = await createClient();
-    await supabase.auth.signOut();
-  } else {
-    // Demo mode: drop the acting role so sign-out visibly does something.
-    const store = await cookies();
-    store.delete(DEMO_ROLE_COOKIE);
-  }
+  const supabase = await createClient();
+  await supabase.auth.signOut();
   revalidatePath("/", "layout");
   redirect("/sign-in");
-}
-
-/**
- * Demo-only: switch the acting role so both permission sets can be seen
- * without an auth backend.
- *
- * Refuses once Supabase is configured — a real user cannot choose their own
- * role, and leaving this reachable would be a privilege-escalation hole rather
- * than a convenience.
- */
-export async function setDemoRole(next: string): Promise<void> {
-  if (isSupabaseConfigured()) return;
-  if (!isRole(next)) return;
-
-  const store = await cookies();
-  store.set(DEMO_ROLE_COOKIE, next, {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 7,
-  });
-
-  revalidatePath("/", "layout");
 }

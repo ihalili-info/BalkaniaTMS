@@ -20,7 +20,8 @@ keep it and `supabase/migrations/` in sync.
 ## Structure
 
 - `Project BalkaniaTMS.md` — architecture doc (source of truth for schema/design decisions)
-- `supabase/bootstrap_profiles.sql` — idempotent profile backfill + first-admin bootstrap; run it in the SQL editor if 0004 was applied before its backfill block existed
+- `supabase/bootstrap_profiles.sql` — idempotent profile backfill + first-admin bootstrap
+- `supabase/diagnose_admin.sql` — prints a plain-English diagnosis per auth user
 - `supabase/migrations/`
   - `0001_init.sql` — DB schema (PostGIS: trucks, orders, loads, load_items, notifications)
   - `0002_truck_details.sql` — dispatcher-owned truck columns (capacity, `features TEXT[]`,
@@ -35,6 +36,9 @@ keep it and `supabase/migrations/` in sync.
     (navigation links). Drivers only, never customers.
   - `0006_fleetmatics_gps.sql` — `trucks.gps_sequence_id` and `last_known_address`
     for the Verizon Connect Reveal push feed
+  - `0007_sent_channels.sql` — widens `driver_messages.channel` to include RCS
+  - `0008_production_reads.sql` — `orders.promised_at`, the `*_geo` views that
+    expose lat/lng, and the analytics RPCs
 - `web/` — Next.js 16 (App Router, TypeScript, Tailwind v4) admin panel. See
   [web/README.md](web/README.md) for its layout and conventions.
   - `src/app/globals.css` — the entire design system as Tailwind v4 `@theme` tokens
@@ -58,8 +62,11 @@ keep it and `supabase/migrations/` in sync.
   - `src/lib/driver-hours.ts` — Reg. (EC) 561/2006 driving time and rest, as pure functions
   - `src/lib/fleet-status.ts` — duty/signal derivation (pure, survives the move to Supabase)
   - `src/lib/truck-features.ts` — equipment tag catalogue (labels + icons)
+  - `src/lib/data/` — the real read layer (`fleet.ts`, `analytics.ts`) and `mutations.ts`
+  - `src/lib/fleet-selectors.ts` — pure selectors, safe for client components
+  - `src/lib/geo/reference.ts` — depot + map landmarks (reference data, not fixtures)
+  - `src/lib/integrations/` — connector catalogue, config store, messaging policy
   - `src/lib/types.ts` — row types mirroring the migration
-  - `src/lib/demo/` — fixtures every page currently renders from
   - `src/lib/supabase/` — `client.ts` (browser), `server.ts` (RSC/route handlers, cookie-based), `service.ts` (service-role, server-only, bypasses RLS — for webhooks/cron)
   - `.env.example` — required env vars (Supabase, Sent, geocoding, GPS provider); copy to `.env.local` and fill in
 
@@ -77,27 +84,30 @@ that validator before changing any of those three values.
 
 ## Status
 
-**Done:** Next.js scaffold; the Balkania TMS design system; AppShell; shared UI
-primitives and SVG charts; all six pages built out against demo fixtures and
-verified in-browser; Supabase client helpers; DB migrations written.
+**Live at tms.balkania.ie.** Supabase Auth is wired, every page reads real
+data, and there are no fixtures anywhere — `lib/demo/` is deleted and the demo
+role switcher is gone. An unconfigured deployment now **throws** rather than
+falling back to a demo user; a silent fallback is how an app ends up
+authenticating nobody.
 
-**Not done:** the pages still read fixtures. Supabase Auth *is* wired
-(`/sign-in`, session refresh in `proxy.ts`, roles from `profiles`), but no page
-queries real data yet.
-Orders arrive by **CSV import** — a deliberate stopgap until
-`/api/webhooks/crm` exists. Truck edits on the Fleet page live in React state
-and vanish on refresh — `updateTruck` in `fleet/fleet-manager.tsx` is the single
-seam to swap for a real mutation. Driver duty counters have no editor at all:
-they are written by the tachograph sync, which is not built.
+**Reads:** `lib/data/fleet.ts` and `lib/data/analytics.ts`. Coordinates come
+from the `trucks_geo` / `orders_geo` views, because PostgREST serialises
+GEOGRAPHY as WKB hex. Those views are `security_invoker = true` — without it a
+view runs with its owner's rights and silently bypasses RLS.
 
-**Backend:** no real Supabase project connected yet — `.env.local` is unset.
-Migration hasn't been applied anywhere.
+**Writes:** `lib/data/mutations.ts`. Truck edits, CSV import and address fixes
+persist. Each action re-checks the session (a server action is a public HTTP
+endpoint) and truck updates go through a **field allow-list**, so a crafted
+call cannot touch `current_location` or `location_updated_at` — the ownership
+split 0002 exists to protect.
 
-**Live Fleet Map:** now a coded screen, but the map itself is a schematic
-equirectangular projection (km units, so the 5 km geofence rings are true to
-scale) — there is no basemap. Choosing and keying a tile provider (Mapbox or
-Google Maps) replaces the `<svg>`; the geofence/route-leg/marker overlays are
-written to carry over.
+**Not done:** no CRM webhook, no tachograph feed, no customs provider, no
+basemap. Creating trucks, drivers and loads from the UI is not built — the
+Fleet page edits existing rows but "Add truck" does nothing yet, so the first
+rows go in through Supabase.
+
+**Empty by design.** The database has no trucks, drivers or loads. Every screen
+has an empty state; nothing is estimated or back-filled.
 
 ## GPS provider — Verizon Connect Reveal (Fleetmatics)
 
@@ -268,6 +278,17 @@ the existing value, otherwise every restriction would be voluntary.
 The sidebar's role switcher is **demo-only** and disappears with Supabase Auth —
 a real user cannot pick their own role. It writes the same cookie every guard
 reads, so switching exercises the real path rather than a bypass.
+
+## Analytics honesty
+
+On-time rate is measured only against `orders.promised_at`. Orders without a
+promised time are **excluded from the denominator**, never counted as on time,
+and when nothing in the window carries one the figure renders as `—` with an
+explanation rather than a fabricated percentage. `promised_at` arrived in 0008
+precisely because the metric had no basis before it.
+
+"Corridors" are gone. The schema records a destination country, not a named
+corridor, so the table shows countries — the honest unit.
 
 ## Regulatory model
 

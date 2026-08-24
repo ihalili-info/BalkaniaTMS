@@ -11,9 +11,10 @@ cp .env.example .env.local   # fill in before any real data will load
 npm run dev                  # http://localhost:3000
 ```
 
-Every screen currently renders **demo fixtures** — no Supabase project is
-connected yet. The header shows a "Demo data" badge so this is never mistaken
-for live state.
+**Supabase is required.** There is no demo mode: without
+`NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` the app throws
+on the first request rather than serving something that authenticates nobody.
+Copy those (and `SUPABASE_SERVICE_ROLE_KEY`) into `.env.local` for local work.
 
 ## Layout
 
@@ -41,7 +42,10 @@ src/
     fleet-status.ts         truck duty / GPS signal derivation
     truck-features.ts       equipment tag catalogue
     format.ts               distance, ETA and relative-time formatting
-    demo/                   fixtures: fleet, analytics, integrations
+    data/                   real reads (fleet, analytics) and mutations
+    fleet-selectors.ts      pure selectors, usable from client components
+    geo/reference.ts        depot + map landmarks
+    integrations/           connector catalogue, config store, messaging policy
     supabase/               client / server / service-role helpers
 ```
 

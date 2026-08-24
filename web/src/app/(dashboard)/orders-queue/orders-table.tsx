@@ -18,7 +18,7 @@ import {
   EmptyState,
 } from "@/components/ui";
 import { formatDate, formatClock } from "@/lib/format";
-import { DEPOT } from "@/lib/demo/fleet";
+import { DEPOT } from "@/lib/geo/reference";
 import { customsRegime } from "@/lib/regions";
 import type { Order, OrderStatus } from "@/lib/types";
 

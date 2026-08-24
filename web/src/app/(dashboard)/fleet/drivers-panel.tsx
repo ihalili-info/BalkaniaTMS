@@ -10,7 +10,6 @@ import {
   StatTile,
   cx,
 } from "@/components/ui";
-import { DEMO_NOW } from "@/lib/demo/fleet";
 import {
   CONTINUOUS_DRIVING_LIMIT_S,
   DUTY_STATUS_LABEL,
@@ -39,12 +38,14 @@ function cpcState(driver: Driver, now: Date) {
 function DriverCard({
   driver,
   assignment,
+  now,
 }: {
   driver: Driver;
   assignment: DriverAssignment;
+  now: Date;
 }) {
   const hours = driverHours(driver);
-  const cpc = cpcState(driver, DEMO_NOW);
+  const cpc = cpcState(driver, now);
 
   return (
     <Card className="flex flex-col">
@@ -180,14 +181,16 @@ function DriverCard({
 export function DriversPanel({
   drivers,
   assignments,
+  now,
 }: {
   drivers: Driver[];
   assignments: Record<string, DriverAssignment>;
+  now: Date;
 }) {
   const atRisk = drivers.filter((d) => driverHours(d).level !== "ok").length;
 
   const cpcSoon = drivers.filter((d) => {
-    const state = cpcState(d, DEMO_NOW);
+    const state = cpcState(d, now);
     return state.level === "expiring" || state.level === "expired";
   }).length;
 
@@ -224,7 +227,7 @@ export function DriversPanel({
         />
         <StatTile
           label="Tacho sync"
-          value={lastSync ? relativeTime(lastSync, DEMO_NOW) : "—"}
+          value={lastSync ? relativeTime(lastSync, now) : "—"}
           hint="Last duty snapshot pulled"
           icon="sync"
         />
@@ -236,6 +239,7 @@ export function DriversPanel({
             <DriverCard
               driver={driver}
               assignment={assignments[driver.id] ?? null}
+              now={now}
             />
           </li>
         ))}

@@ -19,15 +19,14 @@ import {
   cx,
 } from "@/components/ui";
 import {
-  DEMO_NOW,
   GEOFENCE_RADIUS_M,
-  activeLoads,
-  alertLog,
-  alertsToday,
+  activeOf,
+  getLoads,
+  getRecentAlerts,
   loadProgress,
-  plannedLoads,
+  plannedOf,
   stopsInGeofence,
-} from "@/lib/demo/fleet";
+} from "@/lib/data/fleet";
 import {
   CONTINUOUS_DRIVING_LIMIT_S,
   canDriveFor,
@@ -51,21 +50,6 @@ import type { LatLng, LoadView, Stop } from "@/lib/types";
 
 export const metadata: Metadata = { title: "Active Loads" };
 
-const stopsRemaining = activeLoads.reduce(
-  (n, l) => n + l.stops.filter((s) => s.delivered_at === null).length,
-  0,
-);
-
-/** Drivers on the road who are near or past a Reg. 561/2006 limit right now. */
-const hoursAtRisk = activeLoads.filter((l) => {
-  if (!l.driver) return false;
-  return driverHours(l.driver).level !== "ok";
-}).length;
-
-const crossBorderLoads = activeLoads.filter(
-  (l) => l.customs_regime !== "domestic",
-).length;
-
 const NAV_ORDER: NavApp[] = ["google", "waze", "apple"];
 
 function StopRow({
@@ -74,6 +58,7 @@ function StopRow({
   isLast,
   hoursWarning,
   origin,
+  now,
 }: {
   stop: Stop;
   isNext: boolean;
@@ -82,6 +67,7 @@ function StopRow({
   hoursWarning?: string | null;
   /** Truck position, so a single-stop link starts from where it actually is. */
   origin: LatLng | null;
+  now: Date;
 }) {
   const navLinks = NAV_ORDER.map((app) => ({
     id: app,
@@ -171,7 +157,7 @@ function StopRow({
           <>
             <p className="text-body-sm text-ok">Delivered</p>
             <p className="text-caption text-ink-subtle">
-              {relativeTime(stop.delivered_at!, DEMO_NOW)}
+              {relativeTime(stop.delivered_at!, now)}
             </p>
           </>
         ) : (
@@ -193,7 +179,7 @@ function StopRow({
   );
 }
 
-function LoadCard({ load }: { load: LoadView }) {
+function LoadCard({ load, now }: { load: LoadView; now: Date }) {
   const { done, total } = loadProgress(load);
   const nextIndex = load.stops.findIndex((s) => s.delivered_at === null);
 
@@ -224,7 +210,7 @@ function LoadCard({ load }: { load: LoadView }) {
               {load.truck?.license_plate ?? "unassigned"} ·{" "}
               {load.driver?.full_name ?? "no driver"}
               {load.truck ? (
-                <> · GPS {relativeTime(load.truck.location_updated_at, DEMO_NOW)}</>
+                <> · GPS {relativeTime(load.truck.location_updated_at, now)}</>
               ) : null}
             </p>
           </div>
@@ -311,6 +297,7 @@ function LoadCard({ load }: { load: LoadView }) {
             stop={stop}
             isNext={i === nextIndex}
             isLast={i === load.stops.length - 1}
+            now={now}
             hoursWarning={i === nextIndex && !reach.ok ? reach.reason : null}
             origin={load.truck?.current_location ?? null}
           />
@@ -320,7 +307,27 @@ function LoadCard({ load }: { load: LoadView }) {
   );
 }
 
-export default function ActiveLoadsPage() {
+export default async function ActiveLoadsPage() {
+  const now = new Date();
+  const loads = await getLoads();
+  const activeLoads = activeOf(loads);
+  const plannedLoads = plannedOf(loads);
+  const alertLog = await getRecentAlerts(loads);
+
+  const stopsRemaining = activeLoads.reduce(
+    (n, l) => n + l.stops.filter((s) => s.delivered_at === null).length,
+    0,
+  );
+  const inGeofence = stopsInGeofence(loads);
+  const midnight = now.toISOString().slice(0, 10);
+  const alertsToday = alertLog.filter((a) => a.sent_at >= midnight);
+  const hoursAtRisk = activeLoads.filter(
+    (l) => l.driver !== null && driverHours(l.driver).level !== "ok",
+  ).length;
+  const crossBorderLoads = activeLoads.filter(
+    (l) => l.customs_regime !== "domestic",
+  ).length;
+
   return (
     <Page>
       <PageHeader
@@ -353,7 +360,7 @@ export default function ActiveLoadsPage() {
         />
         <StatTile
           label="Inside geofence"
-          value={stopsInGeofence.length}
+          value={inGeofence.length}
           unit={`/ ${GEOFENCE_RADIUS_M / 1000} km`}
           hint="Proximity alert has fired"
           icon="my_location"
@@ -382,7 +389,7 @@ export default function ActiveLoadsPage() {
       <div className="grid gap-4 xl:grid-cols-3">
         <div className="space-y-4 xl:col-span-2">
           {activeLoads.map((load) => (
-            <LoadCard key={load.id} load={load} />
+            <LoadCard key={load.id} load={load} now={now} />
           ))}
         </div>
 
@@ -417,7 +424,7 @@ export default function ActiveLoadsPage() {
                   </p>
                 </div>
                 <span className="shrink-0 whitespace-nowrap text-caption text-ink-subtle">
-                  {relativeTime(event.sent_at, DEMO_NOW)}
+                  {relativeTime(event.sent_at, now)}
                 </span>
               </li>
             ))}

@@ -8,12 +8,14 @@ import { SignInForm } from "./sign-in-form";
 
 export const metadata: Metadata = { title: "Sign in" };
 
+/** Reads the session to bounce an already-signed-in user. */
+export const dynamic = "force-dynamic";
+
 export default async function SignInPage() {
   const configured = isSupabaseConfigured();
 
-  // Already signed in — or running on fixtures, where there is no sign-in to
-  // do and bouncing someone to a dead form would be worse than letting them in.
-  const user = await getCurrentUser();
+  // Already signed in — no reason to show the form again.
+  const user = configured ? await getCurrentUser() : null;
   if (user) redirect("/active-loads");
 
   return (
@@ -53,7 +55,8 @@ export default async function SignInPage() {
               <p className="mb-4 flex items-start gap-2 rounded-sm border border-warn-border bg-warn-soft px-3 py-2 text-caption text-ink-muted">
                 <Icon name="info" className="mt-px text-[15px] text-warn" />
                 No Supabase project is configured, so this form has nothing to
-                authenticate against. The app is running on demo fixtures.
+                authenticate against. Set NEXT_PUBLIC_SUPABASE_URL and
+                NEXT_PUBLIC_SUPABASE_ANON_KEY.
               </p>
             )}
             <SignInForm configured={configured} />

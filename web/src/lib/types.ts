@@ -54,6 +54,12 @@ export interface Truck {
   euro_emission_class: number | null;
   /** ADR classes carried, e.g. ["3", "8"]. The `adr` tag says whether. */
   adr_classes: string[];
+
+  /* --- written by the Reveal GPS feed (migration 0006) --- */
+  /** Last accepted Reveal SequenceId — the replay/out-of-order guard. */
+  gps_sequence_id: number | null;
+  /** Reveal reverse-geocodes each fix, so this costs no geocoding call. */
+  last_known_address: string | null;
 }
 
 /* --- drivers (migration 0003) --------------------------------------------- */

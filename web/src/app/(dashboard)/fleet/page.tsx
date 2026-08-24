@@ -1,7 +1,13 @@
 import type { Metadata } from "next";
 
 import { Button, Page, PageHeader } from "@/components/ui";
-import { drivers, loadForDriver, loadForTruck, trucks } from "@/lib/demo/fleet";
+import {
+  getDrivers,
+  getLoads,
+  getTrucks,
+  loadForDriver,
+  loadForTruck,
+} from "@/lib/data/fleet";
 
 import { FleetTabs } from "./fleet-tabs";
 import type { Assignment } from "./fleet-manager";
@@ -9,38 +15,39 @@ import type { DriverAssignment } from "./drivers-panel";
 
 export const metadata: Metadata = { title: "Fleet" };
 
-/**
- * "Is this truck busy" is a join against `loads`, not a column on `trucks` —
- * resolved here so the client components never carry the load fixtures.
- */
-const truckAssignments: Record<string, Assignment> = Object.fromEntries(
-  trucks.map((truck) => {
-    const load = loadForTruck(truck.id);
-    return [
-      truck.id,
-      load
-        ? { reference: load.reference, driver: load.driver?.full_name ?? null }
-        : null,
-    ];
-  }),
-);
+export default async function FleetPage() {
+  const [trucks, drivers, loads] = await Promise.all([
+    getTrucks(),
+    getDrivers(),
+    getLoads(),
+  ]);
 
-const driverAssignments: Record<string, DriverAssignment> = Object.fromEntries(
-  drivers.map((driver) => {
-    const load = loadForDriver(driver.id);
-    return [
-      driver.id,
-      load
-        ? {
-            reference: load.reference,
-            plate: load.truck?.license_plate ?? null,
-          }
-        : null,
-    ];
-  }),
-);
+  // "Is this truck busy" is a join against `loads`, not a column on `trucks` —
+  // resolved here so the client components never carry the load rows.
+  const truckAssignments: Record<string, Assignment> = Object.fromEntries(
+    trucks.map((truck) => {
+      const load = loadForTruck(loads, truck.id);
+      return [
+        truck.id,
+        load
+          ? { reference: load.reference, driver: load.driver?.full_name ?? null }
+          : null,
+      ];
+    }),
+  );
 
-export default function FleetPage() {
+  const driverAssignments: Record<string, DriverAssignment> = Object.fromEntries(
+    drivers.map((driver) => {
+      const load = loadForDriver(loads, driver.id);
+      return [
+        driver.id,
+        load
+          ? { reference: load.reference, plate: load.truck?.license_plate ?? null }
+          : null,
+      ];
+    }),
+  );
+
   return (
     <Page>
       <PageHeader

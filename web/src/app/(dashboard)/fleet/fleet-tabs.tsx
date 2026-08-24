@@ -22,6 +22,8 @@ export function FleetTabs({
   driverAssignments: Record<string, DriverAssignment>;
 }) {
   const [tab, setTab] = useState<Tab>("trucks");
+  // One clock for the render, so relative times inside it agree.
+  const [now] = useState(() => new Date());
 
   const TABS: { key: Tab; label: string; icon: string; count: number }[] = [
     { key: "trucks", label: "Trucks", icon: "local_shipping", count: trucks.length },
@@ -62,9 +64,9 @@ export function FleetTabs({
       </div>
 
       {tab === "trucks" ? (
-        <FleetManager trucks={trucks} assignments={truckAssignments} />
+        <FleetManager trucks={trucks} assignments={truckAssignments} now={now} />
       ) : (
-        <DriversPanel drivers={drivers} assignments={driverAssignments} />
+        <DriversPanel drivers={drivers} assignments={driverAssignments} now={now} />
       )}
     </>
   );

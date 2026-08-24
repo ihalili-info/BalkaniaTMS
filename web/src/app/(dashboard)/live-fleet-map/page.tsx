@@ -3,19 +3,23 @@ import type { Metadata } from "next";
 import { Button, Icon, Page, PageHeader, StatTile } from "@/components/ui";
 import {
   GEOFENCE_RADIUS_M,
-  activeLoads,
+  activeOf,
+  getLoads,
+  getTrucks,
   stopsInGeofence,
-  trucks,
-} from "@/lib/demo/fleet";
+} from "@/lib/data/fleet";
 
 import { FleetMap } from "./fleet-map";
 
 export const metadata: Metadata = { title: "Live Fleet Map" };
 
-const reporting = trucks.filter((t) => t.current_location !== null);
-const offline = trucks.length - reporting.length;
+export default async function LiveFleetMapPage() {
+  const [trucks, loads] = await Promise.all([getTrucks(), getLoads()]);
+  const reporting = trucks.filter((t) => t.current_location !== null);
+  const offline = trucks.length - reporting.length;
+  const activeLoads = activeOf(loads);
+  const inGeofence = stopsInGeofence(loads);
 
-export default function LiveFleetMapPage() {
   return (
     <Page>
       <PageHeader
@@ -50,7 +54,7 @@ export default function LiveFleetMapPage() {
         />
         <StatTile
           label="Inside geofence"
-          value={stopsInGeofence.length}
+          value={inGeofence.length}
           unit={`/ ${GEOFENCE_RADIUS_M / 1000} km`}
           hint="Approaching a delivery stop"
           icon="my_location"
@@ -65,7 +69,7 @@ export default function LiveFleetMapPage() {
         />
       </div>
 
-      <FleetMap />
+      <FleetMap trucks={trucks} loads={loads} now={new Date()} />
 
       {/* Kept visible rather than buried in a doc: this screen is a placeholder
           geometry until a tile provider is chosen and keyed. */}

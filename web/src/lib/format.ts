@@ -37,7 +37,7 @@ const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
   ["day", 7],
 ];
 
-/** "4 min ago" / "in 2 hours", relative to an explicit `now` (see demo/now). */
+/** "4 min ago" / "in 2 hours", relative to an explicit `now`. */
 export function relativeTime(iso: string, now: Date): string {
   const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
   let delta = (new Date(iso).getTime() - now.getTime()) / 1000;

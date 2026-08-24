@@ -9,7 +9,7 @@ import type { AppUser } from "@/lib/auth/session";
  * whether that is a permission decision or a broken deployment.
  */
 export function ProfileWarning({ user }: { user: AppUser }) {
-  if (user.profileStatus === "ok" || user.profileStatus === "demo") return null;
+  if (user.profileStatus === "ok") return null;
 
   const missing = user.profileStatus === "missing";
 

@@ -1,9 +1,8 @@
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
 
-import { DEFAULT_ROLE, DEMO_ROLE_COOKIE, isRole, type Role } from "./roles";
+import { DEFAULT_ROLE, isRole, type Role } from "./roles";
 
 /**
  * Who is using the app.
@@ -11,15 +10,9 @@ import { DEFAULT_ROLE, DEMO_ROLE_COOKIE, isRole, type Role } from "./roles";
  * Server-only by construction: importing `next/headers` from a client
  * component is a build error, so this module cannot reach the browser bundle.
  *
- * Two modes, and which one is active depends solely on whether Supabase is
- * configured:
- *
- *  · **Real** — a Supabase Auth session, with the role read from `profiles`.
- *    The role must come from that table and never from user metadata, which
- *    the client can write to.
- *  · **Demo** — no Supabase env vars, so the role comes from a cookie the demo
- *    switcher sets. This keeps the fixture deployment working, and it is why
- *    the site is browsable today.
+ * The role always comes from `profiles`, never from user metadata (which the
+ * client can write) and never from a cookie. There is no demo path: an
+ * unconfigured deployment fails to load rather than inventing a dispatcher.
  */
 export interface AppUser {
   id: string;
@@ -27,8 +20,6 @@ export interface AppUser {
   email: string | null;
   role: Role;
   depot: string;
-  /** True while running on fixtures with no real session. */
-  isDemo: boolean;
   /**
    * Why the role is what it is.
    *
@@ -37,14 +28,9 @@ export interface AppUser {
    * "we could not read your profile" look identical from the UI, and the
    * second one is a broken deployment rather than a permission decision.
    */
-  profileStatus: "ok" | "missing" | "error" | "demo";
+  profileStatus: "ok" | "missing" | "error";
   profileError: string | null;
 }
-
-const DEMO_PROFILE: Record<Role, { id: string; fullName: string }> = {
-  admin: { id: "usr-admin", fullName: "Órla Fitzgerald" },
-  dispatcher: { id: "usr-dispatcher", fullName: "Declan Murphy" },
-};
 
 /** Whether a real Supabase project is wired up. */
 export function isSupabaseConfigured(): boolean {
@@ -54,30 +40,18 @@ export function isSupabaseConfigured(): boolean {
   );
 }
 
-async function demoUser(): Promise<AppUser> {
-  const store = await cookies();
-  // Fail closed: an absent or unrecognised value gets the *lower* privilege,
-  // matching the `DEFAULT 'dispatcher'` on profiles.role.
-  const raw = store.get(DEMO_ROLE_COOKIE)?.value;
-  const role: Role = isRole(raw) ? raw : DEFAULT_ROLE;
-
-  return {
-    ...DEMO_PROFILE[role],
-    email: null,
-    role,
-    depot: "Ballymount Terminal, Dublin",
-    isDemo: true,
-    profileStatus: "demo",
-    profileError: null,
-  };
-}
-
 /**
  * The current user, or `null` when Supabase is configured and nobody is signed
  * in. Callers that require a user should use `requireUser()`.
  */
 export async function getCurrentUser(): Promise<AppUser | null> {
-  if (!isSupabaseConfigured()) return demoUser();
+  if (!isSupabaseConfigured()) {
+    // Refuse rather than degrade. A silent fallback here is how a production
+    // deployment ends up serving an app that authenticates nobody.
+    throw new Error(
+      "Supabase is not configured: set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+    );
+  }
 
   const supabase = await createClient();
 
@@ -119,7 +93,6 @@ export async function getCurrentUser(): Promise<AppUser | null> {
     email: user.email ?? null,
     role,
     depot: profile?.depot ?? "Balkania",
-    isDemo: false,
     profileStatus,
     profileError: error?.message ?? null,
   };
@@ -138,4 +111,4 @@ export async function requireUser(): Promise<AppUser> {
 }
 
 /** Re-exported so server call sites need a single import. */
-export { DEFAULT_ROLE, DEMO_ROLE_COOKIE };
+export { DEFAULT_ROLE };

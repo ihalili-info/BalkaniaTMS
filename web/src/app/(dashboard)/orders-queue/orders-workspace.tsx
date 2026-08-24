@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { Badge, Button, Icon, StatTile } from "@/components/ui";
-import { DEMO_NOW } from "@/lib/demo/fleet";
+import { fixOrderAddress, importOrders } from "@/lib/data/mutations";
 import { relativeTime } from "@/lib/format";
 import type { CountryCode } from "@/lib/regions";
 import type { LatLng, Order } from "@/lib/types";
@@ -26,6 +26,8 @@ export function OrdersWorkspace({
   initialOrders: Order[];
   loadRefByOrderId: Record<string, string>;
 }) {
+  // One clock for the render, so relative times inside it agree.
+  const [now] = useState(() => new Date());
   const [orders, setOrders] = useState<Order[]>(initialOrders);
   const [importedIds, setImportedIds] = useState<Set<string>>(new Set());
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -55,10 +57,9 @@ export function OrdersWorkspace({
     [orders],
   );
 
-  /**
-   * Where a corrected address lands. Local state today; wiring Supabase means
-   * an `update(...).eq("id", id)` here and nothing else changes.
-   */
+  const [writeError, setWriteError] = useState<string | null>(null);
+
+  /** Where a corrected address lands. */
   const handleFix = (
     orderId: string,
     patch: {
@@ -71,12 +72,16 @@ export function OrdersWorkspace({
     setOrders((prev) =>
       prev.map((o) =>
         o.id === orderId
-          ? { ...o, ...patch, updated_at: DEMO_NOW.toISOString() }
+          ? { ...o, ...patch, updated_at: new Date().toISOString() }
           : o,
       ),
     );
     const fixed = orders.find((o) => o.id === orderId);
     setLastFixed(fixed?.crm_order_id ?? null);
+    setWriteError(null);
+    void fixOrderAddress(orderId, patch).then((r) => {
+      if (!r.ok) setWriteError(r.message ?? "Could not save the address.");
+    });
 
     // Stay open while there is more to fix; the list shrinks under us.
     const remaining = stats.ungeocoded.filter((o) => o.id !== orderId);
@@ -93,6 +98,10 @@ export function OrdersWorkspace({
     });
     setLastImport(incoming.length);
     setDialogOpen(false);
+    setWriteError(null);
+    void importOrders(incoming).then((r) => {
+      if (!r.ok) setWriteError(r.message ?? "Could not save the imported orders.");
+    });
   };
 
   return (
@@ -116,7 +125,7 @@ export function OrdersWorkspace({
           label="Oldest in queue"
           value={
             stats.oldest
-              ? relativeTime(stats.oldest, DEMO_NOW).replace(" ago", "")
+              ? relativeTime(stats.oldest, now).replace(" ago", "")
               : "—"
           }
           hint="Since it reached the queue"
@@ -138,6 +147,16 @@ export function OrdersWorkspace({
         />
       </div>
 
+      {writeError ? (
+        <p
+          role="alert"
+          className="mb-4 flex items-start gap-2 rounded-lg border border-danger-border bg-danger-soft px-4 py-3 text-body-sm text-danger"
+        >
+          <Icon name="error" className="mt-px text-[18px]" />
+          {writeError}
+        </p>
+      ) : null}
+
       {lastFixed ? (
         <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-ok-border bg-ok-soft px-4 py-3">
           <Icon name="edit_location_alt" className="text-[20px] text-ok" />
@@ -158,11 +177,7 @@ export function OrdersWorkspace({
         <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-ok-border bg-ok-soft px-4 py-3">
           <Icon name="task_alt" className="text-[20px] text-ok" />
           <p className="min-w-0 flex-1 text-body-sm text-ink">
-            Imported {lastImport} order{lastImport === 1 ? "" : "s"}.{" "}
-            <span className="text-ink-muted">
-              They are held in this page only — there is no Supabase project
-              connected yet, so a refresh restores the fixtures.
-            </span>
+            Imported {lastImport} order{lastImport === 1 ? "" : "s"}.
           </p>
           <Button variant="ghost" onClick={() => setLastImport(null)}>
             Dismiss
@@ -237,7 +252,7 @@ export function OrdersWorkspace({
       {dialogOpen ? (
         <ImportDialog
           existingRefs={existingRefs}
-          now={DEMO_NOW}
+          now={now}
           onImport={handleImport}
           onClose={() => setDialogOpen(false)}
         />

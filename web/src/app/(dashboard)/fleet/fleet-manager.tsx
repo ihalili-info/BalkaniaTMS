@@ -13,7 +13,7 @@ import {
   TruckSignalBadge,
   cx,
 } from "@/components/ui";
-import { DEMO_NOW } from "@/lib/demo/fleet";
+import { updateTruck as persistTruck } from "@/lib/data/mutations";
 import { truckDuty, truckSignal, unavailabilityReason } from "@/lib/fleet-status";
 import { formatDateFull } from "@/lib/format";
 import { vehicleBreaches } from "@/lib/regions";
@@ -95,14 +95,16 @@ function TruckCard({
   assignment,
   onEdit,
   onToggle,
+  now,
 }: {
   truck: Truck;
   assignment: Assignment;
   onEdit: () => void;
   onToggle: (next: boolean) => void;
+  now: Date;
 }) {
   const duty = truckDuty(truck, assignment !== null);
-  const signal = truckSignal(truck, DEMO_NOW);
+  const signal = truckSignal(truck, now);
   const reason = unavailabilityReason(truck);
 
   // Ireland and the UK allow 4.65 m; most of the mainland stops at 4.00 m, so
@@ -240,9 +242,11 @@ function TruckCard({
 export function FleetManager({
   trucks,
   assignments,
+  now,
 }: {
   trucks: Truck[];
   assignments: Record<string, Assignment>;
+  now: Date;
 }) {
   const [fleet, setFleet] = useState<Truck[]>(trucks);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -250,22 +254,33 @@ export function FleetManager({
   const [featureFilter, setFeatureFilter] = useState<string[]>([]);
   const [query, setQuery] = useState("");
 
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   /**
    * The single seam where a truck edit lands.
    *
-   * Today it updates local state and nothing is persisted — the app has no
-   * Supabase project yet. Wiring it up means replacing this body with an
-   * `update(...).eq("id", id)` through `@/lib/supabase/client` (plus a
-   * revalidate); every caller, the editor and the toggle stay as they are.
+   * Optimistic: the card updates immediately, and reverts if the write is
+   * refused. Silently keeping a rejected edit on screen would be worse than
+   * the flicker — a dispatcher would believe a truck was marked unavailable
+   * when the database still says otherwise.
    */
   const updateTruck = (id: string, patch: Partial<Truck>) => {
+    const previous = fleet;
+    setSaveError(null);
     setFleet((prev) =>
       prev.map((t) =>
         t.id === id
-          ? { ...t, ...patch, details_updated_at: DEMO_NOW.toISOString() }
+          ? { ...t, ...patch, details_updated_at: new Date().toISOString() }
           : t,
       ),
     );
+
+    void persistTruck(id, patch).then((result) => {
+      if (!result.ok) {
+        setFleet(previous);
+        setSaveError(result.message ?? "Could not save that change.");
+      }
+    });
   };
 
   const counts = useMemo(() => {
@@ -281,7 +296,7 @@ export function FleetManager({
   }, [fleet, assignments]);
 
   const noFix = fleet.filter(
-    (t) => truckSignal(t, DEMO_NOW) === "no_fix",
+    (t) => truckSignal(t, now) === "no_fix",
   ).length;
 
   const visible = useMemo(() => {
@@ -430,6 +445,7 @@ export function FleetManager({
               <TruckCard
                 truck={truck}
                 assignment={assignments[truck.id] ?? null}
+                now={now}
                 onEdit={() => setEditingId(truck.id)}
                 onToggle={(next) =>
                   updateTruck(truck.id, {
@@ -446,15 +462,20 @@ export function FleetManager({
         </ul>
       )}
 
-      <p className="mt-4 flex items-center gap-2 text-caption text-ink-subtle">
-        <Icon name="history" className="text-[15px]" />
-        Edits are held in the page only — there is no Supabase project connected
-        yet, so a refresh restores the fixtures.
-      </p>
+      {saveError ? (
+        <p
+          role="alert"
+          className="mt-4 flex items-start gap-2 rounded-sm border border-danger-border bg-danger-soft px-3 py-2 text-body-sm text-danger"
+        >
+          <Icon name="error" className="mt-px text-[17px]" />
+          {saveError}
+        </p>
+      ) : null}
 
       {editing ? (
         <TruckEditor
           truck={editing}
+          now={now}
           onClose={() => setEditingId(null)}
           onSave={(patch) => {
             updateTruck(editing.id, patch);

@@ -34,13 +34,7 @@ export async function saveConnectorConfig(
   if (!spec) return { ok: false, message: "Unknown integration." };
 
   const user = await getCurrentUser();
-  if (!user || user.isDemo) {
-    return {
-      ok: false,
-      message:
-        "Running on demo fixtures — connect Supabase before saving settings.",
-    };
-  }
+  if (!user) return { ok: false, message: "Not signed in." };
 
   // Allow-list: only fields this connector declares. Anything else in the form
   // body is ignored rather than written.

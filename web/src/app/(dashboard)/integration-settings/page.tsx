@@ -12,7 +12,7 @@ import {
 } from "@/components/ui";
 import { requireAccess } from "@/lib/auth/guard";
 import { getCurrentUser } from "@/lib/auth/session";
-import { privacySettings } from "@/lib/demo/integrations";
+import { privacySettings } from "@/lib/integrations/policy";
 import { deriveStatus, loadConnectorStates } from "@/lib/integrations/store";
 
 import { ConnectorCard } from "./connector-card";
@@ -28,7 +28,7 @@ export default async function IntegrationSettingsPage() {
 
   const states = await loadConnectorStates();
   const user = await getCurrentUser();
-  const canEdit = user !== null && !user.isDemo;
+  const canEdit = user !== null;
   const ready = states.filter((s) => deriveStatus(s) === "connected").length;
 
   return (
@@ -57,9 +57,10 @@ export default async function IntegrationSettingsPage() {
               {ready} of {states.length} integrations configured
             </p>
             <p className="mt-0.5 text-body-sm text-ink-muted">
-              {canEdit
-                ? "Settings below are editable and saved to integration_settings. Secrets stay in the environment."
-                : "Running on demo fixtures — connect Supabase to save settings."}
+              Settings below are saved to{" "}
+              <code className="font-mono">integration_settings</code>. Secrets
+              stay in environment variables and are never written to the
+              database.
             </p>
             <Progress
               value={ready}

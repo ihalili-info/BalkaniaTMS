@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import { Badge, Card, CardBody, CardHeader, Icon, cx } from "@/components/ui";
-import { messageTemplates } from "@/lib/demo/integrations";
+import { messageTemplates } from "@/lib/integrations/policy";
 import type { NotificationType } from "@/lib/types";
 
 const TYPES = Object.keys(messageTemplates) as NotificationType[];

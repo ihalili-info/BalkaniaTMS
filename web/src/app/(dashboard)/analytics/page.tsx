@@ -7,6 +7,8 @@ import {
   Card,
   CardBody,
   CardHeader,
+  EmptyState,
+  Icon,
   NOTIFICATION_LABEL,
   Page,
   PageHeader,
@@ -17,12 +19,8 @@ import {
   Th,
   Tr,
 } from "@/components/ui";
-import {
-  alertsByType,
-  corridors,
-  dailySeries,
-  summary,
-} from "@/lib/demo/analytics";
+import { getAnalytics } from "@/lib/data/analytics";
+import { country } from "@/lib/regions";
 
 export const metadata: Metadata = { title: "Analytics" };
 
@@ -45,27 +43,32 @@ const dayCaption = (iso: string) =>
     timeZone: "UTC",
   }).format(new Date(iso));
 
-const deliveryPoints = dailySeries.map((d) => ({
-  label: dayLabel(d.date),
-  value: d.deliveries,
-  caption: dayCaption(d.date),
-}));
+export default async function AnalyticsPage() {
+  const a = await getAnalytics(14);
 
-const onTimePoints = dailySeries.map((d) => ({
-  label: dayLabel(d.date),
-  value: d.on_time_pct,
-  caption: dayCaption(d.date),
-}));
+  const deliveryPoints = a.days.map((d) => ({
+    label: dayLabel(d.date),
+    value: d.deliveries,
+    caption: dayCaption(d.date),
+  }));
 
-const alertCategories = alertsByType.map((a, i) => ({
-  label: NOTIFICATION_LABEL[a.type],
-  value: a.count,
-  color: CATEGORY_COLORS[i],
-}));
+  // Only days with something to measure belong on an on-time chart.
+  const onTimePoints = a.days
+    .filter((d) => d.measurable > 0)
+    .map((d) => ({
+      label: dayLabel(d.date),
+      value: Math.round((d.onTime / d.measurable) * 1000) / 10,
+      caption: dayCaption(d.date),
+    }));
 
-const maxCorridorDeliveries = Math.max(...corridors.map((c) => c.deliveries));
+  const alertCategories = a.alerts.map((x, i) => ({
+    label: NOTIFICATION_LABEL[x.type] ?? x.type,
+    value: x.sent,
+    color: CATEGORY_COLORS[i % CATEGORY_COLORS.length],
+  }));
 
-export default function AnalyticsPage() {
+  const maxDeliveries = Math.max(1, ...a.destinations.map((d) => d.deliveries));
+
   return (
     <Page>
       <PageHeader
@@ -82,125 +85,189 @@ export default function AnalyticsPage() {
         }
       />
 
-      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatTile
-          label="On-time rate"
-          value={summary.onTimePct}
-          unit="%"
-          hint={`+${summary.onTimeDeltaPts} pts vs. previous 14 days`}
-          icon="schedule"
-          tone="ok"
-        />
-        <StatTile
-          label="Deliveries"
-          value={summary.deliveries}
-          hint="Completed stops"
-          icon="package_2"
-          tone="brand"
-        />
-        <StatTile
-          label="Alerts sent"
-          value={summary.alertsSent}
-          hint="SMS and WhatsApp combined"
-          icon="forum"
-        />
-        <StatTile
-          label="Alert lead time"
-          value={summary.avgAlertLeadMin}
-          unit="min"
-          hint="Proximity alert to delivery"
-          icon="notifications_active"
-          tone="warn"
-        />
-      </div>
-
-      {/* Two measures, two scales — deliberately two plots on one axis each,
-          never a dual-axis chart. */}
-      <div className="mb-4 grid gap-4 xl:grid-cols-2">
+      {!a.hasAnyData ? (
         <Card>
-          <CardHeader
-            title="Deliveries per day"
-            hint="Completed stops, last 14 days"
+          <EmptyState
+            icon="monitoring"
+            title="Nothing to report yet"
+            description="Figures appear once loads start completing and alerts start going out. Nothing here is estimated or back-filled."
           />
-          <CardBody>
-            <ColumnChart data={deliveryPoints} unit="deliveries" />
-          </CardBody>
         </Card>
+      ) : (
+        <>
+          <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <StatTile
+              label="On-time rate"
+              value={a.onTimePct ?? "—"}
+              unit={a.onTimePct === null ? undefined : "%"}
+              hint={
+                a.onTimePct === null
+                  ? "No orders carried a promised time"
+                  : `Measured over ${a.measurable} of ${a.totalDeliveries} deliveries`
+              }
+              icon="schedule"
+              tone={a.onTimePct === null ? "neutral" : "ok"}
+            />
+            <StatTile
+              label="Deliveries"
+              value={a.totalDeliveries}
+              hint="Completed stops"
+              icon="package_2"
+              tone="brand"
+            />
+            <StatTile
+              label="Alerts sent"
+              value={a.alertsSent}
+              hint="SMS, WhatsApp and RCS via Sent"
+              icon="forum"
+            />
+            <StatTile
+              label="Alert lead time"
+              value={a.avgAlertLeadMin ?? "—"}
+              unit={a.avgAlertLeadMin === null ? undefined : "min"}
+              hint="Proximity alert to delivery"
+              icon="notifications_active"
+              tone="warn"
+            />
+          </div>
 
-        <Card>
-          <CardHeader
-            title="On-time rate"
-            hint="Share of stops served inside the promised window"
-          />
-          <CardBody>
-            <LineChart data={onTimePoints} unit="%" />
-          </CardBody>
-        </Card>
-      </div>
+          {a.onTimePct === null ? (
+            <p className="mb-4 flex items-start gap-2 rounded-lg border border-warn-border bg-warn-soft px-4 py-3 text-body-sm text-ink-muted">
+              <Icon name="info" className="mt-px text-[18px] text-warn" />
+              <span>
+                On-time performance needs a promised delivery time. Populate{" "}
+                <code className="font-mono">orders.promised_at</code> from the
+                CRM or the CSV import and the rate starts filling in — until
+                then it is left blank rather than guessed at.
+              </span>
+            </p>
+          ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-[20rem_1fr]">
-        <Card>
-          <CardHeader title="Alerts by type" hint="sent.dm sends, last 14 days" />
-          <CardBody>
-            <CategoryBars items={alertCategories} unit="Sent" />
-          </CardBody>
-        </Card>
+          {/* Two measures, two scales — two plots on one axis each, never a
+              dual-axis chart. */}
+          <div className="mb-4 grid gap-4 xl:grid-cols-2">
+            <Card>
+              <CardHeader
+                title="Deliveries per day"
+                hint="Completed stops, last 14 days"
+              />
+              <CardBody>
+                <ColumnChart data={deliveryPoints} unit="deliveries" />
+              </CardBody>
+            </Card>
 
-        <Card>
-          <CardHeader
-            title="Corridor performance"
-            hint="Where the fleet runs and how well"
-            actions={
-              <Badge tone={corridors.some((c) => c.on_time_pct < 90) ? "warn" : "ok"} dot>
-                {corridors.filter((c) => c.on_time_pct < 90).length} below 90%
-              </Badge>
-            }
-          />
-          <Table>
-            <thead>
-              <tr>
-                <Th>Corridor</Th>
-                <Th className="w-56">Deliveries</Th>
-                <Th className="text-right">Avg stops / load</Th>
-                <Th className="text-right">On time</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {corridors.map((c) => (
-                <Tr key={c.corridor}>
-                  <Td className="font-medium text-ink">{c.corridor}</Td>
-                  <Td>
-                    <div className="flex items-center gap-3">
-                      <Progress
-                        value={c.deliveries}
-                        max={maxCorridorDeliveries}
-                        className="flex-1"
-                      />
-                      <span className="w-8 shrink-0 text-right font-mono text-data-sm tabular text-ink-muted">
-                        {c.deliveries}
-                      </span>
-                    </div>
-                  </Td>
-                  <Td className="text-right font-mono text-data-sm tabular text-ink-muted">
-                    {c.avg_stops.toFixed(1)}
-                  </Td>
-                  <Td className="text-right">
-                    <span
-                      className={
-                        c.on_time_pct < 90
-                          ? "font-mono text-data-sm tabular text-warn"
-                          : "font-mono text-data-sm tabular text-ink"
-                      }
-                    >
-                      {c.on_time_pct.toFixed(1)}%
-                    </span>
-                  </Td>
-                </Tr>
-              ))}
-            </tbody>
-          </Table>
-        </Card>
-      </div>
+            <Card>
+              <CardHeader
+                title="On-time rate"
+                hint="Share of promised deliveries met"
+              />
+              <CardBody>
+                {onTimePoints.length > 0 ? (
+                  <LineChart data={onTimePoints} unit="%" />
+                ) : (
+                  <EmptyState
+                    icon="schedule"
+                    title="No promised times recorded"
+                    description="Nothing in this window can be measured for punctuality."
+                  />
+                )}
+              </CardBody>
+            </Card>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[20rem_1fr]">
+            <Card>
+              <CardHeader
+                title="Alerts by type"
+                hint="sent.dm sends, last 14 days"
+              />
+              <CardBody>
+                {alertCategories.length > 0 ? (
+                  <CategoryBars items={alertCategories} unit="Sent" />
+                ) : (
+                  <EmptyState icon="forum" title="No alerts sent yet" />
+                )}
+              </CardBody>
+            </Card>
+
+            <Card>
+              <CardHeader
+                title="Destinations"
+                hint="Where the fleet delivered, by country"
+                actions={
+                  <Badge tone="neutral">
+                    {a.destinations.length} countr
+                    {a.destinations.length === 1 ? "y" : "ies"}
+                  </Badge>
+                }
+              />
+              {a.destinations.length > 0 ? (
+                <Table>
+                  <thead>
+                    <tr>
+                      <Th>Country</Th>
+                      <Th className="w-56">Deliveries</Th>
+                      <Th className="text-right">On time</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {a.destinations.map((d) => {
+                      const pct =
+                        d.measurable === 0
+                          ? null
+                          : Math.round((d.onTime / d.measurable) * 1000) / 10;
+                      return (
+                        <Tr key={d.country}>
+                          <Td className="font-medium text-ink">
+                            {country(d.country).name}
+                            <span className="ml-1.5 font-mono text-data-sm text-ink-subtle">
+                              {d.country}
+                            </span>
+                          </Td>
+                          <Td>
+                            <div className="flex items-center gap-3">
+                              <Progress
+                                value={d.deliveries}
+                                max={maxDeliveries}
+                                className="flex-1"
+                              />
+                              <span className="w-8 shrink-0 text-right font-mono text-data-sm tabular text-ink-muted">
+                                {d.deliveries}
+                              </span>
+                            </div>
+                          </Td>
+                          <Td className="text-right font-mono text-data-sm tabular">
+                            {pct === null ? (
+                              <span
+                                className="text-ink-subtle"
+                                title="No promised times for this country"
+                              >
+                                —
+                              </span>
+                            ) : (
+                              <span
+                                className={pct < 90 ? "text-warn" : "text-ink"}
+                              >
+                                {pct.toFixed(1)}%
+                              </span>
+                            )}
+                          </Td>
+                        </Tr>
+                      );
+                    })}
+                  </tbody>
+                </Table>
+              ) : (
+                <EmptyState
+                  icon="public"
+                  title="No completed deliveries yet"
+                  description="Destinations appear as loads finish."
+                />
+              )}
+            </Card>
+          </div>
+        </>
+      )}
     </Page>
   );
 }

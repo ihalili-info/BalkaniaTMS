@@ -14,13 +14,6 @@
  * imports this file.
  */
 
-/**
- * Cookie the demo role switcher writes. Declared here rather than beside the
- * session helpers because `proxy.ts` runs on the edge runtime and must not
- * pull in `next/headers` transitively.
- */
-export const DEMO_ROLE_COOKIE = "balkania_demo_role";
-
 export type Role = "admin" | "dispatcher";
 
 export const ROLES: Record<Role, { label: string; description: string }> = {

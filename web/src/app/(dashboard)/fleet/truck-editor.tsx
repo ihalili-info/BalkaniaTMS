@@ -10,7 +10,6 @@ import {
   controlClass,
   cx,
 } from "@/components/ui";
-import { DEMO_NOW } from "@/lib/demo/fleet";
 import { COUNTRIES, vehicleBreaches } from "@/lib/regions";
 import { formatCoords, relativeTime } from "@/lib/format";
 import {
@@ -53,10 +52,12 @@ export function TruckEditor({
   truck,
   onSave,
   onClose,
+  now,
 }: {
   truck: Truck;
   onSave: (patch: Partial<Truck>) => void;
   onClose: () => void;
+  now: Date;
 }) {
   const [label, setLabel] = useState(truck.label ?? "");
   const [makeModel, setMakeModel] = useState(truck.make_model ?? "");
@@ -517,7 +518,7 @@ export function TruckEditor({
                 ["Position", formatCoords(truck.current_location)],
                 [
                   "Last fix",
-                  relativeTime(truck.location_updated_at, DEMO_NOW),
+                  relativeTime(truck.location_updated_at, now),
                 ],
               ].map(([term, value]) => (
                 <div key={term} className="flex justify-between gap-3">

@@ -8,6 +8,8 @@ import { ROLES, moduleForPath, modulesFor } from "@/lib/auth/roles";
 
 export const metadata: Metadata = { title: "No access" };
 
+export const dynamic = "force-dynamic";
+
 export default async function ForbiddenPage({
   searchParams,
 }: PageProps<"/forbidden">) {
