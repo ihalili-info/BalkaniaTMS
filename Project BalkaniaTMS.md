@@ -66,7 +66,7 @@
 * **Notification Types** (logged individually in the `notifications` table so each can fire independently per order):
   * **Dispatch Confirmation:** *"Your order #1234 has been loaded and is on the way."*
   * **Proximity Alert:** *"Our driver is approximately 15 minutes away from your location."*
-  * **Delivery Complete:** *"Order delivered successfully."*
+  * **Delivery Complete:** *"Order delivered successfully."*.
 
 ---
 
