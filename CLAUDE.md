@@ -212,26 +212,47 @@ characters — that alone doubled a route message from 3 segments to 6.
 
 ## Messaging provider — Sent (sent.dm)
 
-`POST https://api.sent.dm/v3/messages`, authenticated with an `x-api-key`
-header. Client in `web/src/lib/messaging/sent.ts`.
+`POST https://api.sent.dm/v3/messages`, authenticated with an **`x-api-key`**
+header holding a UUID. Their authentication reference is explicit that this is
+header-key auth, *not* `Authorization: Bearer`. Client in
+`web/src/lib/messaging/sent.ts` — a plain `fetch` client, so no runtime
+dependency; the official SDK is `@sentdm/sentdm` if that ever changes.
 
-Two behaviours here differ from a Twilio-shaped API and both cost money:
+Behaviours that differ from a Twilio-shaped API, and two of them cost money:
 
 - **`channel` is a broadcast list, not a fallback order.** `["sms","whatsapp"]`
   sends *two* messages and bills for both; the customer gets the alert twice.
-  **Omitting `channel` is what gives cross-channel fallback** — that is the
-  right default for a transactional alert, and it is what `deliverBy: "auto"`
-  does. There is deliberately no "all channels" option in the UI.
-- **`template` and `text` are mutually exclusive** — exactly one, or the API
-  returns 400. Raw `text` is supported, so the message templates in the app
-  work without registering anything with the provider.
+  The value meaning "pick one, with fallback" is the sentinel **`["sent"]`** —
+  also the server-side default when `channel` is omitted. `deliverBy: "auto"`
+  sends it explicitly rather than depending on a default that could change.
+  There is deliberately no "all channels" option in the UI.
+- **`template` and `text` are mutually exclusive** — exactly one, or 400. Raw
+  `text` is supported, so the app's templates need nothing registered with the
+  provider.
+- **The response is enveloped.** Message ids live at
+  `data.recipients[].message_id` — one per recipient, not one per call — with
+  `meta.request_id` for support queries. Reading a top-level `message_id`
+  silently yields null.
+- **`sandbox: true`** validates auth, body and template without sending or
+  billing. Use it for the first end-to-end run.
+- **`Idempotency-Key`** is how a retried send avoids double-billing and
+  double-alerting; derive it from `(load_item_id, type)`.
+- **`GET /v3/me`** is the free connection test — `verifyConnection()`. A test
+  button that sends a real message is not a test.
 
 RCS is a first-class channel alongside SMS and WhatsApp (migration 0007 widened
 the `driver_messages.channel` CHECK to match).
 
-**Unverified:** the `x-profile-id` sender-profile header, and the signing scheme
-for inbound delivery-status webhooks. Confirm both against the account before
-relying on them — `.env.example` says so too.
+**Inbound webhook signatures are verified**, and the scheme is no longer a
+guess: strip `whsec_` from the secret, base64-decode the rest as the HMAC key,
+and compare `HMAC-SHA256("{X-Webhook-ID}.{X-Webhook-Timestamp}.{rawBody}")`
+against the `v1,{base64}` signature header, rejecting anything more than five
+minutes old. `rawBody` must be the **exact bytes received** — a parse/stringify
+round trip reorders keys and can never match.
+
+**Still unverified:** the `x-profile-id` sender-profile header. The
+authentication reference says the key alone identifies the caller, so it is
+probably unnecessary; it is sent only when `SENT_PROFILE_ID` is set.
 
 ## Order intake
 
