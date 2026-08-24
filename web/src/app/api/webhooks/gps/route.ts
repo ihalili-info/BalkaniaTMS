@@ -25,6 +25,41 @@ import {
 // to cache and nothing to prerender.
 export const dynamic = "force-dynamic";
 
+type Outcome = "stored" | "skipped" | "rejected" | "unauthorized" | "bad_request";
+
+interface DeliveryRecord {
+  vehicle_number: string | null;
+  outcome: Outcome;
+  reason: string | null;
+  payload?: unknown;
+}
+
+/**
+ * Records what arrived, so "no fixes yet" is diagnosable.
+ *
+ * Never allowed to fail the request: a logging problem must not make Verizon
+ * retry a fix that was actually stored.
+ */
+async function logDeliveries(rows: DeliveryRecord[]): Promise<void> {
+  if (rows.length === 0) return;
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return;
+  try {
+    const supabase = createServiceClient();
+    await supabase.from("gps_webhook_deliveries").insert(
+      rows.map((r) => ({
+        vehicle_number: r.vehicle_number,
+        outcome: r.outcome,
+        reason: r.reason,
+        // Only keep the payload when something went wrong — a stored fix is
+        // already on the truck row, and the payload carries a driver name.
+        payload: r.outcome === "stored" ? null : (r.payload ?? null),
+      })),
+    );
+  } catch {
+    // Deliberately swallowed. See above.
+  }
+}
+
 function unauthorized() {
   return new Response("Unauthorized", {
     status: 401,
@@ -66,12 +101,30 @@ function authorised(request: Request): boolean {
 }
 
 export async function POST(request: Request) {
-  if (!authorised(request)) return unauthorized();
+  if (!authorised(request)) {
+    // Logged too: "Verizon is calling but the credentials are wrong" looks
+    // exactly like "Verizon has never called" without this.
+    await logDeliveries([
+      {
+        vehicle_number: null,
+        outcome: "unauthorized",
+        reason: "Basic auth rejected",
+      },
+    ]);
+    return unauthorized();
+  }
 
   let payload: unknown;
   try {
     payload = await request.json();
   } catch {
+    await logDeliveries([
+      {
+        vehicle_number: null,
+        outcome: "bad_request",
+        reason: "body was not valid JSON",
+      },
+    ]);
     return Response.json({ error: "invalid JSON" }, { status: 400 });
   }
 
@@ -82,20 +135,28 @@ export async function POST(request: Request) {
 
   const accepted: VehicleFix[] = [];
   const rejected: { reason: string }[] = [];
+  const log: DeliveryRecord[] = [];
 
   for (const message of messages) {
     const result = normaliseGpsPush(message);
-    if (result.ok) accepted.push(result.fix);
-    else rejected.push({ reason: result.reason });
+    if (result.ok) {
+      accepted.push(result.fix);
+    } else {
+      rejected.push({ reason: result.reason });
+      log.push({
+        vehicle_number: message.Vehicle?.Number ?? null,
+        outcome: "rejected",
+        reason: result.reason,
+        payload: message,
+      });
+    }
   }
 
   if (accepted.length === 0) {
+    await logDeliveries(log);
     // Nothing usable, but the delivery itself was fine — 200 so Verizon does
     // not retry a payload that will never parse.
-    return Response.json(
-      { stored: 0, rejected },
-      { status: 200 },
-    );
+    return Response.json({ stored: 0, rejected }, { status: 200 });
   }
 
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
@@ -126,6 +187,12 @@ export async function POST(request: Request) {
       // A vehicle in Reveal that is not in our fleet is not an error — it is a
       // truck someone has not added yet.
       skipped.push(`${fix.vehicleNumber}: no matching truck`);
+      log.push({
+        vehicle_number: fix.vehicleNumber,
+        outcome: "skipped",
+        reason: "no truck with this Vehicle Number",
+        payload: { Vehicle: { Number: fix.vehicleNumber } },
+      });
       continue;
     }
 
@@ -137,6 +204,11 @@ export async function POST(request: Request) {
     });
     if (!isNewer) {
       skipped.push(`${fix.vehicleNumber}: stale or duplicate`);
+      log.push({
+        vehicle_number: fix.vehicleNumber,
+        outcome: "skipped",
+        reason: "stale or duplicate (SequenceId not newer)",
+      });
       continue;
     }
 
@@ -156,8 +228,14 @@ export async function POST(request: Request) {
       return Response.json({ error: updateError.message }, { status: 500 });
     }
     stored += 1;
+    log.push({
+      vehicle_number: fix.vehicleNumber,
+      outcome: "stored",
+      reason: null,
+    });
   }
 
+  await logDeliveries(log);
   return Response.json({ stored, skipped, rejected }, { status: 200 });
 }
 

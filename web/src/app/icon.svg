@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600">
+  <!-- Favicon: the B alone plus the purple accent. The TMS ribbon lettering
+       is unreadable at 32px, so it becomes a solid bar rather than mush. -->
+  <rect width="600" height="600" rx="120" fill="#101073"/>
+  <path fill="#7C0FE8" d="M150 150 L214 150 L214 398 L150 398 Z"/>
+  <path fill="#7C0FE8" d="M214 400 C214 400 230 470 268 476 C268 476 214 486 190 470 A44 44 0 1 1 214 400 Z"/>
+  <path
+    fill="#FFFFFF"
+    fill-rule="evenodd"
+    d="M248 132 L376 132 C452 132 490 168 490 222 C490 262 468 288 434 298 C478 308 508 340 508 390 C508 448 464 478 380 478 L248 478 Z
+       M330 198 L330 278 L372 278 C406 278 422 264 422 238 C422 212 406 198 372 198 Z
+       M330 336 L330 416 L380 416 C418 416 436 402 436 376 C436 350 418 336 380 336 Z"
+  />
+</svg>

@@ -36,12 +36,29 @@
   --color-rail-ink: #9fadbe;
   --color-rail-ink-strong: #f2f6fb;
 
-  /* --- Brand ---------------------------------------------------------------- */
-  --color-brand: #2f5bd7;
-  --color-brand-hover: #2447b4;
-  --color-brand-soft: #eff3fe;
-  --color-brand-border: #cbd8fa;
-  --color-brand-ink: #1c3d9e;
+  /* --- Brand ---------------------------------------------------------------
+     Navy is the primary; the violet from the TMS ribbon is the accent.
+
+     Two things are deliberate here:
+     · The navy is nearly invisible on the dark rail (1.17:1), so the rail
+       accent is `--color-accent-rail`, a lighter violet at 4.67:1 — enough
+       for label text, not just decoration.
+     · The chart palette below is NOT derived from the navy. At L 0.274 it
+       fails the dataviz lightness band outright; a chart mark has to sit in
+       0.43–0.77 to stay readable. Brand colour and data colour are different
+       jobs. */
+  --color-brand: #101073;
+  --color-brand-hover: #1a1a91;
+  --color-brand-soft: #eef0fb;
+  --color-brand-border: #c6cbef;
+  --color-brand-ink: #101073;
+
+  /* The TMS violet. 6.79:1 on white. */
+  --color-accent: #7c0fe8;
+  --color-accent-soft: #f4ecfe;
+  --color-accent-border: #ddc6fb;
+  /* Rail-safe variant — 4.67:1 on --color-rail. */
+  --color-accent-rail: #9a5cff;
 
   /* --- Status: one triplet per state (fg / tinted bg / tint border) --------- */
   --color-ok: #12855a;
@@ -57,11 +74,15 @@
   --color-danger-border: #f6cec9;
 
   /* --- Data visualization ---------------------------------------------------
-     Fixed categorical order — slot 1 is the brand hue. Assigned by entity,
-     never by rank, and never cycled. Verified with the dataviz palette
-     validator against the light surface: lightness band, chroma floor,
-     CVD separation (worst adjacent pair dE 12.9 protan), and 3:1 contrast
-     all pass. Re-run the validator before changing any of these. */
+     Fixed categorical order, assigned by entity — never by rank, never
+     cycled.
+
+     Slot 1 is NOT the brand navy, deliberately. Run through the dataviz
+     validator the navy lands at lightness 0.274 and fails the 0.43–0.77 band
+     outright: too dark to read as a chart mark. Brand colour and data colour
+     answer different questions. This trio passes every check (lightness band,
+     chroma floor, CVD separation dE 12.9 protan, 3:1 contrast) — re-run the
+     validator before changing any of them. */
   --color-viz-1: #2f5bd7;
   --color-viz-2: #c2701c;
   --color-viz-3: #0f9488;

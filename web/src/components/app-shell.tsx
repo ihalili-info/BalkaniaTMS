@@ -23,19 +23,16 @@ export interface ShellStats {
 
 function BrandMark() {
   return (
-    <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-brand text-ink-inverse">
-      <svg viewBox="0 0 24 24" className="size-5" aria-hidden="true">
-        <path
-          d="M4.5 19c0-6 7.5-4.5 7.5-7S19.5 11 19.5 5"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-        />
-        <circle cx="4.5" cy="19" r="2.4" fill="currentColor" />
-        <circle cx="19.5" cy="5" r="2.4" fill="currentColor" />
-      </svg>
-    </span>
+    // Plain <img>: the mark is a static SVG in /public, so next/image would
+    // add a request round-trip and a layout wrapper for no benefit.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src="/logo.svg"
+      alt=""
+      width={34}
+      height={34}
+      className="size-[34px] shrink-0"
+    />
   );
 }
 
@@ -62,7 +59,7 @@ function Sidebar({
           <span className="truncate text-heading tracking-tight text-rail-ink-strong">
             Balkania
           </span>
-          <span className="mt-0.5 font-mono text-label uppercase text-brand">
+          <span className="mt-0.5 font-mono text-label uppercase text-accent-rail">
             TMS
           </span>
         </span>
@@ -93,14 +90,14 @@ function Sidebar({
                       )}
                     >
                       {active ? (
-                        <span className="absolute inset-y-1.5 -left-3 w-0.5 rounded-r-full bg-brand" />
+                        <span className="absolute inset-y-1.5 -left-3 w-0.5 rounded-r-full bg-accent-rail" />
                       ) : null}
                       <Icon
                         name={item.icon}
                         filled={active}
                         className={cx(
                           "text-[19px]",
-                          active ? "text-brand" : "text-rail-ink/70",
+                          active ? "text-accent-rail" : "text-rail-ink/70",
                         )}
                       />
                       <span className="flex-1 truncate">{item.label}</span>
@@ -111,7 +108,7 @@ function Sidebar({
                             count.tone === "warn"
                               ? "bg-warn/20 text-warn"
                               : active
-                                ? "bg-brand text-ink-inverse"
+                                ? "bg-accent-rail text-rail"
                                 : "bg-rail-hover text-rail-ink",
                           )}
                         >

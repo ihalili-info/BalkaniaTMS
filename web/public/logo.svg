@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" role="img" aria-label="Balkania TMS">
+  <title>Balkania TMS</title>
+  <!--
+    Traced by eye from the supplied raster. Close, not exact — if you have the
+    original vector, replace this file. Nothing references its internals, only
+    the path /logo.svg, so a swap needs no code change.
+  -->
+  <g fill-rule="evenodd">
+    <!-- pin: round at lower-left, point reaching up to the ribbon -->
+    <path fill="#7C0FE8"
+      d="M196 372 L196 462 C214 472 238 478 262 480
+         C230 492 194 492 168 482
+         A56 56 0 1 1 196 372 Z" />
+
+    <!-- TMS ribbon, top edge angled like a bookmark -->
+    <path fill="#7C0FE8"
+      d="M196 136 L140 160 C126 166 118 179 118 194 L118 374 L196 374 Z" />
+
+    <!-- TMS, reading bottom-to-top -->
+    <text transform="translate(172 356) rotate(-90)"
+      fill="#FFFFFF"
+      font-family="Inter, 'Helvetica Neue', Arial, sans-serif"
+      font-size="70" font-weight="800" letter-spacing="4">TMS</text>
+
+    <!-- B -->
+    <path fill="#101073"
+      d="M204 126 L358 126 C446 126 492 166 492 226 C492 270 466 300 424 310
+         C476 320 512 356 512 410 C512 470 458 486 360 486 L204 486 Z
+         M298 194 L298 282 L352 282 C392 282 412 267 412 238 C412 209 392 194 352 194 Z
+         M298 342 L298 430 L362 430 C406 430 428 415 428 386 C428 357 406 342 362 342 Z" />
+  </g>
+</svg>

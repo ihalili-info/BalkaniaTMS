@@ -22,22 +22,11 @@ export default async function SignInPage() {
     <div className="flex min-h-screen items-center justify-center bg-canvas px-6">
       <div className="w-full max-w-sm">
         <div className="mb-6 flex items-center gap-2.5">
-          <span className="flex size-9 items-center justify-center rounded-md bg-brand text-ink-inverse">
-            <svg viewBox="0 0 24 24" className="size-5" aria-hidden="true">
-              <path
-                d="M4.5 19c0-6 7.5-4.5 7.5-7S19.5 11 19.5 5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-              <circle cx="4.5" cy="19" r="2.4" fill="currentColor" />
-              <circle cx="19.5" cy="5" r="2.4" fill="currentColor" />
-            </svg>
-          </span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.svg" alt="" width={40} height={40} className="size-10" />
           <span className="flex flex-col leading-none">
             <span className="text-heading tracking-tight text-ink">Balkania</span>
-            <span className="mt-0.5 font-mono text-label uppercase text-brand">
+            <span className="mt-0.5 font-mono text-label uppercase text-accent">
               TMS
             </span>
           </span>
