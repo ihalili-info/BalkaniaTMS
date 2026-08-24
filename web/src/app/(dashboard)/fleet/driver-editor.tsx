@@ -6,7 +6,7 @@ import { Button, Field, Icon, controlClass, cx } from "@/components/ui";
 import { createDriver, updateDriver, type DriverInput } from "@/lib/data/mutations";
 import { COUNTRIES, HOME_COUNTRY, country } from "@/lib/regions";
 import type { CountryCode } from "@/lib/regions";
-import type { Driver } from "@/lib/types";
+import type { Driver, Truck } from "@/lib/types";
 
 /**
  * Add or edit a driver.
@@ -18,11 +18,17 @@ import type { Driver } from "@/lib/types";
  */
 export function DriverEditor({
   driver,
+  trucks,
+  otherDrivers,
   onClose,
   onSaved,
 }: {
   /** null for a new driver. */
   driver: Driver | null;
+  /** Every truck, so a vehicle can be assigned without leaving this dialog. */
+  trucks: Truck[];
+  /** Used only to say who else is already on the chosen truck. */
+  otherDrivers: Driver[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -34,6 +40,7 @@ export function DriverEditor({
   const [card, setCard] = useState(driver?.tachograph_card_no ?? "");
   const [cpc, setCpc] = useState(driver?.cpc_expires_on?.slice(0, 10) ?? "");
   const [licence, setLicence] = useState(driver?.driving_licence_no ?? "");
+  const [truckId, setTruckId] = useState(driver?.assigned_truck_id ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -54,6 +61,7 @@ export function DriverEditor({
       tachograph_card_no: card,
       cpc_expires_on: cpc,
       driving_licence_no: licence,
+      assigned_truck_id: truckId === "" ? null : truckId,
     };
     startTransition(async () => {
       const result = driver
@@ -63,6 +71,15 @@ export function DriverEditor({
       else setError(result.message ?? "Could not save.");
     });
   };
+
+  const chosen = trucks.find((t) => t.id === truckId) ?? null;
+  // A truck can carry two drivers on opposite shifts, so this is information,
+  // not an error — but a silent second assignment is how a truck ends up
+  // double-booked.
+  const sharedWith =
+    truckId === ""
+      ? []
+      : otherDrivers.filter((d) => d.assigned_truck_id === truckId);
 
   const dialPrefix = country(homeCountry).dialPrefix;
   const phoneOdd =
@@ -147,6 +164,58 @@ export function DriverEditor({
                 <Icon name="warning" className="mt-px text-[14px]" />
                 No country code — route messages may fail. Expected{" "}
                 {dialPrefix}…
+              </p>
+            ) : null}
+          </section>
+
+          <section className="space-y-2 border-t border-hairline pt-5">
+            <Field
+              label="Assigned vehicle"
+              htmlFor="d-truck"
+              hint="The truck this driver normally runs. Planning default only — a load can still be given any truck."
+            >
+              <select
+                id="d-truck"
+                className={controlClass}
+                value={truckId}
+                onChange={(e) => setTruckId(e.target.value)}
+              >
+                <option value="">No vehicle assigned</option>
+                {trucks.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.license_plate}
+                    {t.label ? ` — ${t.label}` : ""}
+                    {t.availability !== "available"
+                      ? ` (${t.availability.replace("_", " ")})`
+                      : ""}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            {trucks.length === 0 ? (
+              <p className="flex items-start gap-1.5 text-caption text-ink-subtle">
+                <Icon name="info" className="mt-px text-[14px]" />
+                No trucks yet. Add them on the Trucks tab, or pull them from
+                Reveal with Sync fleet.
+              </p>
+            ) : null}
+
+            {sharedWith.length > 0 ? (
+              <p className="flex items-start gap-1.5 text-caption text-ink-muted">
+                <Icon name="group" className="mt-px text-[14px]" />
+                Also assigned to {sharedWith.map((d) => d.full_name).join(", ")}.
+                That is allowed — double-shifting one unit is normal — but worth
+                knowing before you plan.
+              </p>
+            ) : null}
+
+            {chosen && chosen.availability !== "available" ? (
+              <p className="flex items-start gap-1.5 text-caption text-warn">
+                <Icon name="warning" className="mt-px text-[14px]" />
+                {chosen.license_plate} is marked{" "}
+                {chosen.availability.replace("_", " ")}, so it will not appear
+                when planning a load.
               </p>
             ) : null}
           </section>

@@ -36,6 +36,10 @@ keep it and `supabase/migrations/` in sync.
     (navigation links). Drivers only, never customers.
   - `0006_fleetmatics_gps.sql` — `trucks.gps_sequence_id` and `last_known_address`
     for the Verizon Connect Reveal push feed
+  - `0011_driver_vehicle.sql` — `drivers.assigned_truck_id` / `assigned_at`: the
+    truck a driver normally runs. Deliberately **not** unique — double-shifting
+    one tractor is normal — and stamped by a trigger so an unrelated edit does
+    not make the pairing look freshly set
   - `0007_sent_channels.sql` — widens `driver_messages.channel` to include RCS
   - `0008_production_reads.sql` — `orders.promised_at`, the `*_geo` views that
     expose lat/lng, and the analytics RPCs
@@ -108,6 +112,15 @@ rows go in through Supabase.
 
 **Empty by design.** The database has no trucks, drivers or loads. Every screen
 has an empty state; nothing is estimated or back-filled.
+
+## Polling is not realtime
+
+**A successful "Sync GPS" proves the pull API works and says nothing about the
+push feed.** The two are separate paths with separate credentials, and a fleet
+can show fresh-looking coordinates that are only ever as new as the last time
+somebody pressed the button. `gps_webhook_deliveries` is the only evidence the
+push feed is delivering; `RealtimeStatus` on the Live Fleet Map and the GPS
+feed card on Integrations both read it and nothing else.
 
 ## GPS provider — Verizon Connect Reveal (Fleetmatics)
 
@@ -333,6 +346,20 @@ personal data with a retention window.
 `gross_weight_kg` is the regulated figure. Ireland and the UK allow 4.65 m,
 most of the mainland 4.00 m — so a legal Irish trailer can be illegal in France.
 `vehicleBreaches()` catches that, and the Fleet cards surface it.
+
+## Loads: editing and deleting
+
+`updateLoad` / `deleteLoad` in `lib/data/mutations.ts`, surfaced by the `⋯`
+menu on each load card.
+
+- A **delivered** stop can never be removed or reordered out of existence — it
+  records something that happened.
+- **Delete is refused** when any stop is delivered *or* any `notifications` row
+  exists for its stops. `load_items` cascades from `loads` and `notifications`
+  cascades from `load_items`, so deleting would destroy the evidence that a
+  delivery occurred and that a customer was told about it.
+- Removed and deleted orders revert to `pending` and reappear in the Orders
+  Queue. The work is never lost, only the plan.
 
 ## Truck data ownership
 

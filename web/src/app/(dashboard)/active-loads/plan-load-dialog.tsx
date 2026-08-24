@@ -78,6 +78,19 @@ export function PlanLoadDialog({
     ? destinations.flatMap((c) => vehicleBreaches(truck, c))
     : [];
 
+  /**
+   * Picking a driver pulls their assigned vehicle across.
+   *
+   * Only when that truck is actually available: a driver whose usual unit is
+   * in the workshop needs a different truck, and silently selecting one that
+   * cannot take work would fail at create time instead of here.
+   */
+  const pickDriver = (id: string) => {
+    setDriverId(id);
+    const usual = drivers.find((d) => d.id === id)?.assigned_truck_id;
+    if (usual && available.some((t) => t.id === usual)) setTruckId(usual);
+  };
+
   const toggle = (id: string) =>
     setPicked((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
@@ -182,14 +195,20 @@ export function PlanLoadDialog({
                 id="pl-driver"
                 className={controlClass}
                 value={driverId}
-                onChange={(e) => setDriverId(e.target.value)}
+                onChange={(e) => pickDriver(e.target.value)}
               >
                 <option value="">Unassigned</option>
-                {drivers.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.full_name}
-                  </option>
-                ))}
+                {drivers.map((d) => {
+                  const plate = trucks.find(
+                    (t) => t.id === d.assigned_truck_id,
+                  )?.license_plate;
+                  return (
+                    <option key={d.id} value={d.id}>
+                      {d.full_name}
+                      {plate ? ` — ${plate}` : ""}
+                    </option>
+                  );
+                })}
               </select>
             </Field>
 

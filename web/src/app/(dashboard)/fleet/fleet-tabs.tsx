@@ -66,7 +66,12 @@ export function FleetTabs({
       {tab === "trucks" ? (
         <FleetManager trucks={trucks} assignments={truckAssignments} now={now} />
       ) : (
-        <DriversPanel drivers={drivers} assignments={driverAssignments} now={now} />
+        <DriversPanel
+          drivers={drivers}
+          trucks={trucks}
+          assignments={driverAssignments}
+          now={now}
+        />
       )}
     </>
   );

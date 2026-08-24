@@ -23,7 +23,7 @@ import {
   formatDuration,
 } from "@/lib/driver-hours";
 import { formatDateFull, relativeTime } from "@/lib/format";
-import type { Driver } from "@/lib/types";
+import type { Driver, Truck } from "@/lib/types";
 
 import { DriverEditor } from "./driver-editor";
 
@@ -44,11 +44,14 @@ function cpcState(driver: Driver, now: Date) {
 
 function DriverCard({
   driver,
+  truck,
   assignment,
   now,
   onEdit,
 }: {
   driver: Driver;
+  /** The driver's assigned vehicle, if the truck still exists. */
+  truck: Truck | null;
   assignment: DriverAssignment;
   now: Date;
   onEdit: () => void;
@@ -82,7 +85,14 @@ function DriverCard({
             <h3 className="truncate text-heading text-ink">{driver.full_name}</h3>
             <CountryChip code={driver.home_country} />
           </div>
-          <p className="truncate font-mono text-data-sm text-ink-subtle">
+          <p className="flex items-center gap-1.5 truncate font-mono text-data-sm text-ink-subtle">
+            <Icon name="local_shipping" className="text-[14px]" />
+            {truck ? (
+              <span className="text-ink">{truck.license_plate}</span>
+            ) : (
+              <span>no vehicle</span>
+            )}
+            <span aria-hidden="true">·</span>
             {driver.tachograph_card_no ?? "no tacho card"}
           </p>
         </div>
@@ -219,10 +229,12 @@ function DriverCard({
 
 export function DriversPanel({
   drivers,
+  trucks,
   assignments,
   now,
 }: {
   drivers: Driver[];
+  trucks: Truck[];
   assignments: Record<string, DriverAssignment>;
   now: Date;
 }) {
@@ -312,6 +324,9 @@ export function DriversPanel({
             <li key={driver.id} className="flex">
               <DriverCard
                 driver={driver}
+                truck={
+                  trucks.find((t) => t.id === driver.assigned_truck_id) ?? null
+                }
                 assignment={assignments[driver.id] ?? null}
                 now={now}
                 onEdit={() => setEditing(driver)}
@@ -324,6 +339,8 @@ export function DriversPanel({
       {editing !== undefined ? (
         <DriverEditor
           driver={editing}
+          trucks={trucks}
+          otherDrivers={drivers.filter((d) => d.id !== editing?.id)}
           onClose={() => setEditing(undefined)}
           onSaved={() => {
             setEditing(undefined);

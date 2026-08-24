@@ -175,6 +175,8 @@ export interface DriverInput {
   tachograph_card_no: string | null;
   cpc_expires_on: string | null;
   driving_licence_no: string | null;
+  /** The truck this driver normally runs. null = none. */
+  assigned_truck_id: string | null;
 }
 
 /**
@@ -193,6 +195,10 @@ function driverFields(input: DriverInput) {
     tachograph_card_no: input.tachograph_card_no?.trim() || null,
     cpc_expires_on: input.cpc_expires_on || null,
     driving_licence_no: input.driving_licence_no?.trim() || null,
+    // `assigned_at` is stamped by a trigger, not here — see migration 0011.
+    // Doing it in the app would make an unchanged pairing look freshly set on
+    // every unrelated edit.
+    assigned_truck_id: input.assigned_truck_id || null,
   };
 }
 
@@ -393,6 +399,186 @@ export async function startLoad(loadId: string): Promise<WriteResult> {
     revalidatePath("/active-loads");
     revalidatePath("/orders-queue");
     return { ok: true, message: null };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+}
+
+/* --- editing and removing a load --------------------------------------------- */
+
+export interface EditLoadInput {
+  truckId: string;
+  driverId: string | null;
+  cmrNumber: string | null;
+  /** Order ids in their new sequence. Delivered stops must all still be present. */
+  orderIds: string[];
+}
+
+export async function updateLoad(
+  loadId: string,
+  input: EditLoadInput,
+): Promise<WriteResult> {
+  try {
+    await requireSession();
+    const supabase = await createClient();
+
+    const { data: existing, error: readError } = await supabase
+      .from("load_items")
+      .select("id, order_id, delivered_at")
+      .eq("load_id", loadId);
+    if (readError) return { ok: false, message: readError.message };
+
+    const delivered = (existing ?? []).filter((i) => i.delivered_at !== null);
+    const keeping = new Set(input.orderIds);
+
+    // A delivered stop is a record of something that happened. Dropping it
+    // would erase the delivery and orphan its notification rows — the evidence
+    // that a customer was told.
+    const droppedDelivered = delivered.filter((i) => !keeping.has(i.order_id));
+    if (droppedDelivered.length > 0) {
+      return {
+        ok: false,
+        message: `${droppedDelivered.length} of those stops have already been delivered and cannot be removed.`,
+      };
+    }
+    if (input.orderIds.length === 0) {
+      return { ok: false, message: "A load needs at least one stop." };
+    }
+
+    // Orders being added must not already sit on another load.
+    const currentOrderIds = new Set((existing ?? []).map((i) => i.order_id));
+    const added = input.orderIds.filter((id) => !currentOrderIds.has(id));
+    if (added.length > 0) {
+      const { data: clash } = await supabase
+        .from("load_items")
+        .select("order_id")
+        .in("order_id", added);
+      if (clash && clash.length > 0) {
+        return {
+          ok: false,
+          message: `${clash.length} of those orders are already on another load.`,
+        };
+      }
+    }
+
+    const { error: loadError } = await supabase
+      .from("loads")
+      .update({
+        truck_id: input.truckId,
+        driver_id: input.driverId,
+        cmr_number: input.cmrNumber,
+      })
+      .eq("id", loadId);
+    if (loadError) return { ok: false, message: loadError.message };
+
+    // Removed stops: delete the item and put the order back in the queue.
+    const removed = (existing ?? []).filter((i) => !keeping.has(i.order_id));
+    if (removed.length > 0) {
+      await supabase
+        .from("load_items")
+        .delete()
+        .in("id", removed.map((i) => i.id));
+      await supabase
+        .from("orders")
+        .update({ status: "pending", updated_at: new Date().toISOString() })
+        .in("id", removed.map((i) => i.order_id));
+    }
+
+    // Resequence everything that remains, and insert anything new.
+    const byOrder = new Map((existing ?? []).map((i) => [i.order_id, i]));
+    for (const [index, orderId] of input.orderIds.entries()) {
+      const item = byOrder.get(orderId);
+      if (item) {
+        await supabase
+          .from("load_items")
+          .update({ stop_sequence: index + 1 })
+          .eq("id", item.id);
+      } else {
+        await supabase.from("load_items").insert({
+          load_id: loadId,
+          order_id: orderId,
+          stop_sequence: index + 1,
+        });
+        await supabase
+          .from("orders")
+          .update({ status: "assigned", updated_at: new Date().toISOString() })
+          .eq("id", orderId);
+      }
+    }
+
+    revalidatePath("/active-loads");
+    revalidatePath("/orders-queue");
+    revalidatePath("/live-fleet-map");
+    return { ok: true, message: null };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+}
+
+/**
+ * Removes a load and returns its orders to the queue.
+ *
+ * Refused once anything has actually happened on it. `load_items` cascades
+ * from `loads`, and `notifications` cascades from `load_items`, so deleting a
+ * load that has delivered stops or sent alerts would silently destroy the
+ * record that a delivery was made and that a customer was told. That is
+ * evidence, not clutter.
+ */
+export async function deleteLoad(loadId: string): Promise<WriteResult> {
+  try {
+    await requireSession();
+    const supabase = await createClient();
+
+    const { data: items, error } = await supabase
+      .from("load_items")
+      .select("id, order_id, delivered_at")
+      .eq("load_id", loadId);
+    if (error) return { ok: false, message: error.message };
+
+    const delivered = (items ?? []).filter((i) => i.delivered_at !== null);
+    if (delivered.length > 0) {
+      return {
+        ok: false,
+        message: `This load has ${delivered.length} delivered stop${delivered.length === 1 ? "" : "s"}. Deleting it would erase that delivery history — complete the load instead.`,
+      };
+    }
+
+    const stopIds = (items ?? []).map((i) => i.id);
+    if (stopIds.length > 0) {
+      const { count } = await supabase
+        .from("notifications")
+        .select("id", { count: "exact", head: true })
+        .in("load_item_id", stopIds);
+      if ((count ?? 0) > 0) {
+        return {
+          ok: false,
+          message: `${count} customer alert${count === 1 ? " has" : "s have"} already been sent for this load. Deleting it would destroy the record of those messages.`,
+        };
+      }
+    }
+
+    // Back to the queue, so the work is not lost with the plan.
+    const orderIds = (items ?? []).map((i) => i.order_id);
+    if (orderIds.length > 0) {
+      await supabase
+        .from("orders")
+        .update({ status: "pending", updated_at: new Date().toISOString() })
+        .in("id", orderIds);
+    }
+
+    const { error: deleteError } = await supabase
+      .from("loads")
+      .delete()
+      .eq("id", loadId);
+    if (deleteError) return { ok: false, message: deleteError.message };
+
+    revalidatePath("/active-loads");
+    revalidatePath("/orders-queue");
+    revalidatePath("/live-fleet-map");
+    return {
+      ok: true,
+      message: `Load deleted. ${orderIds.length} order${orderIds.length === 1 ? "" : "s"} returned to the queue.`,
+    };
   } catch (e) {
     return { ok: false, message: (e as Error).message };
   }

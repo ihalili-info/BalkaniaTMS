@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 
 import {
   Badge,
-  Button,
   Card,
   CardHeader,
   CustomsBadge,
@@ -50,9 +49,10 @@ import {
 import { CUSTOMS_REGIME } from "@/lib/regions";
 
 import { DispatchActions } from "./dispatch-actions";
+import { LoadMenu } from "./load-menu";
 import { StartLoadButton } from "./start-load";
 import { RouteActions, StopNavMenu } from "./route-actions";
-import type { LatLng, LoadView, Stop } from "@/lib/types";
+import type { Driver, LatLng, LoadView, Order, Stop, Truck } from "@/lib/types";
 
 export const metadata: Metadata = { title: "Active Loads" };
 
@@ -185,7 +185,19 @@ function StopRow({
   );
 }
 
-function LoadCard({ load, now }: { load: LoadView; now: Date }) {
+function LoadCard({
+  load,
+  now,
+  trucks,
+  drivers,
+  unassignedOrders,
+}: {
+  load: LoadView;
+  now: Date;
+  trucks: Truck[];
+  drivers: Driver[];
+  unassignedOrders: Order[];
+}) {
   const { done, total } = loadProgress(load);
   const nextIndex = load.stops.findIndex((s) => s.delivered_at === null);
 
@@ -234,7 +246,12 @@ function LoadCard({ load, now }: { load: LoadView; now: Date }) {
             <Progress value={done} max={total} tone={done === total ? "ok" : "brand"} />
           </div>
           <RouteActions load={load} />
-          <Button variant="ghost" icon="more_horiz" aria-label="Load actions" />
+          <LoadMenu
+            load={load}
+            trucks={trucks}
+            drivers={drivers}
+            unassignedOrders={unassignedOrders}
+          />
         </div>
       </div>
 
@@ -475,7 +492,14 @@ export default async function ActiveLoadsPage() {
           ) : null}
 
           {activeLoads.map((load) => (
-            <LoadCard key={load.id} load={load} now={now} />
+            <LoadCard
+              key={load.id}
+              load={load}
+              now={now}
+              trucks={trucks}
+              drivers={drivers}
+              unassignedOrders={unassignedOrders}
+            />
           ))}
         </div>
 

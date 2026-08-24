@@ -38,6 +38,8 @@ import {
 import { DEFAULT_VIEW, DEPOT, REFERENCE_PLACES } from "@/lib/geo/reference";
 import type { LatLng, LoadView, Truck } from "@/lib/types";
 
+import { GoogleCanvas } from "./google-canvas";
+
 const KM_PER_DEG_LAT = 110.574;
 const kmPerDegLng = (lat: number) => 111.32 * Math.cos((lat * Math.PI) / 180);
 const GEOFENCE_KM = GEOFENCE_RADIUS_M / 1000;
@@ -51,10 +53,13 @@ export function FleetMap({
   trucks,
   loads,
   now,
+  googleMapsKey,
 }: {
   trucks: Truck[];
   loads: LoadView[];
   now: Date;
+  /** Absent → the schematic below, which is to scale but has no roads. */
+  googleMapsKey: string | null;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(
     trucks[0]?.id ?? null,
@@ -176,11 +181,21 @@ export function FleetMap({
       <Card className="overflow-hidden">
         <CardHeader
           title="Fleet positions"
-          hint="Equirectangular schematic · geofence rings drawn to true 5 km scale"
+          hint={
+            googleMapsKey
+              ? "Google basemap · 5 km geofence rings drawn on the sphere"
+              : "Equirectangular schematic · geofence rings drawn to true 5 km scale"
+          }
           actions={
-            <Badge tone="warn" dot>
-              No basemap
-            </Badge>
+            googleMapsKey ? (
+              <Badge tone="ok" dot>
+                Google Maps
+              </Badge>
+            ) : (
+              <Badge tone="warn" dot>
+                No basemap
+              </Badge>
+            )
           }
         />
 
@@ -190,6 +205,14 @@ export function FleetMap({
               icon="satellite_alt"
               title="No positions yet"
               description="Every truck is waiting for its first GPS fix. Check that Vehicle Numbers are set in Reveal and that the webhook endpoint has been registered."
+            />
+          ) : googleMapsKey ? (
+            <GoogleCanvas
+              apiKey={googleMapsKey}
+              trucks={trucks}
+              loads={loads}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
             />
           ) : (
             <svg
@@ -377,7 +400,7 @@ export function FleetMap({
           )}
 
           {located.length > 0 ? (
-            <ul className="absolute bottom-3 right-3 space-y-1 rounded-sm border border-hairline bg-surface/90 px-3 py-2 backdrop-blur-sm">
+            <ul className="pointer-events-none absolute bottom-3 right-3 z-10 space-y-1 rounded-sm border border-hairline bg-surface/90 px-3 py-2 backdrop-blur-sm">
               {[
                 { color: "var(--color-brand)", label: "Truck / route leg" },
                 { color: "var(--color-warn)", label: "Inside 5 km geofence" },

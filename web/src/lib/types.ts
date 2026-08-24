@@ -83,6 +83,16 @@ export interface Driver {
   cpc_expires_on: string | null;
   driving_licence_no: string | null;
 
+  /**
+   * The truck this driver normally runs (migration 0011).
+   *
+   * A planning default, not a record of what was driven: the load's own
+   * `truck_id` is what the job was actually done in. Nullable because "no
+   * vehicle right now" is an ordinary state.
+   */
+  assigned_truck_id: string | null;
+  assigned_at: string | null;
+
   /* Duty snapshot, overwritten by each tachograph sync (Reg. 561/2006). */
   duty_status: DutyStatus;
   driving_seconds_since_break: number;

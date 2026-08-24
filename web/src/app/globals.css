@@ -215,3 +215,12 @@
     outline-offset: 2px;
   }
 }
+
+/* Google Maps marker labels. Rendered inside Google's own DOM, so they cannot
+   be styled with utilities — the class name is passed to `Marker.label`. */
+.gmap-plate {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.02em;
+  paint-order: stroke;
+  -webkit-text-stroke: 3px var(--color-surface);
+}
