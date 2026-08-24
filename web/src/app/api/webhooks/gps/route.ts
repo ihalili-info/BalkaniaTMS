@@ -7,6 +7,10 @@ import {
   type FleetmaticsGpsPush,
   type VehicleFix,
 } from "@/lib/telematics/fleetmatics";
+import {
+  confirmSubscription,
+  readSubscription,
+} from "@/lib/telematics/subscription";
 
 /**
  * Verizon Connect Reveal GPS webhook.
@@ -25,13 +29,21 @@ import {
 // to cache and nothing to prerender.
 export const dynamic = "force-dynamic";
 
-type Outcome = "stored" | "skipped" | "rejected" | "unauthorized" | "bad_request";
+type Outcome =
+  | "stored"
+  | "skipped"
+  | "rejected"
+  | "unauthorized"
+  | "bad_request"
+  | "subscription_confirmed"
+  | "subscription_pending";
 
 interface DeliveryRecord {
   vehicle_number: string | null;
   outcome: Outcome;
   reason: string | null;
   payload?: unknown;
+  subscribe_url?: string | null;
 }
 
 /**
@@ -53,6 +65,7 @@ async function logDeliveries(rows: DeliveryRecord[]): Promise<void> {
         // Only keep the payload when something went wrong — a stored fix is
         // already on the truck row, and the payload carries a driver name.
         payload: r.outcome === "stored" ? null : (r.payload ?? null),
+        subscribe_url: r.subscribe_url ?? null,
       })),
     );
   } catch {
@@ -101,6 +114,41 @@ function authorised(request: Request): boolean {
 }
 
 export async function POST(request: Request) {
+  // The body is read first because the subscription handshake has to be
+  // handled even when it arrives without credentials. Verizon's confirmation
+  // is the message that *activates* the feed; rejecting it as unauthorized
+  // would silently burn the three-day window and cancel the submission.
+  const raw = await request.text();
+
+  let payload: unknown = null;
+  try {
+    payload = raw === "" ? null : JSON.parse(raw);
+  } catch {
+    payload = null;
+  }
+
+  const subscription = readSubscription(payload);
+  if (subscription) {
+    const result = await confirmSubscription(subscription.subscribeUrl);
+    await logDeliveries([
+      {
+        vehicle_number: null,
+        outcome: result.confirmed
+          ? "subscription_confirmed"
+          : "subscription_pending",
+        reason: result.reason,
+        payload,
+        subscribe_url: subscription.subscribeUrl,
+      },
+    ]);
+    // 200 either way: the message was understood. A non-200 here would make
+    // Verizon retry a handshake that may already have succeeded.
+    return Response.json(
+      { subscription: result.confirmed ? "confirmed" : "pending" },
+      { status: 200 },
+    );
+  }
+
   if (!authorised(request)) {
     // Logged too: "Verizon is calling but the credentials are wrong" looks
     // exactly like "Verizon has never called" without this.
@@ -114,15 +162,12 @@ export async function POST(request: Request) {
     return unauthorized();
   }
 
-  let payload: unknown;
-  try {
-    payload = await request.json();
-  } catch {
+  if (payload === null) {
     await logDeliveries([
       {
         vehicle_number: null,
         outcome: "bad_request",
-        reason: "body was not valid JSON",
+        reason: "body was empty or not valid JSON",
       },
     ]);
     return Response.json({ error: "invalid JSON" }, { status: 400 });

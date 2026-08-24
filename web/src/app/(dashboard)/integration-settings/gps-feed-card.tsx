@@ -20,6 +20,8 @@ const OUTCOME: Record<string, { tone: Tone; label: string }> = {
   rejected: { tone: "danger", label: "Rejected" },
   unauthorized: { tone: "danger", label: "Auth failed" },
   bad_request: { tone: "danger", label: "Bad request" },
+  subscription_confirmed: { tone: "ok", label: "Subscribed" },
+  subscription_pending: { tone: "warn", label: "Needs confirming" },
 };
 
 /**
@@ -96,6 +98,26 @@ export function GpsFeedCard({
         />
         {health.diagnosis}
       </p>
+
+      {health.pendingSubscribeUrl ? (
+        <div className="border-t border-warn-border bg-warn-soft px-5 py-4">
+          <p className="mb-2 text-body-sm font-medium text-ink">
+            Finish the subscription by opening this URL
+          </p>
+          <a
+            href={health.pendingSubscribeUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block break-all rounded-sm border border-hairline bg-surface px-3 py-2 font-mono text-data-sm text-brand underline-offset-2 hover:underline"
+          >
+            {health.pendingSubscribeUrl}
+          </a>
+          <p className="mt-2 text-caption text-ink-muted">
+            One click, once. Verizon does not send positions until this is
+            fetched, and the submission expires three days after it was made.
+          </p>
+        </div>
+      ) : null}
 
       {health.recent.length === 0 ? (
         <EmptyState
