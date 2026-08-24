@@ -130,6 +130,18 @@ Auth, and the asymmetry is easy to get wrong:
   issued by Verizon. Registration is not self-serve — it goes through Reveal
   (API integrations → SUBMIT ENDPOINTS → GPS webhook) or their support.
 
+**Fleet sync.** `Sync from Reveal` on the Fleet page pulls `/cmd/v1/vehicles`
+and creates/updates truck rows keyed on Vehicle Number. Two rules make it safe
+to re-run: it **never deletes** (a vehicle gone from Reveal may still carry load
+history, so it is reported not acted on), and it only writes the fields Reveal
+owns — capacity, equipment and availability are dispatcher-owned and survive a
+sync untouched. It always previews before writing.
+
+The vehicle-list response fields are **not publicly documented**, so
+`normaliseVehicle()` accepts several plausible spellings and keeps the raw
+record; the preview dialog shows it so the mapping can be confirmed against a
+real payload rather than assumed.
+
 `trucks.gps_device_id` holds Reveal's **Vehicle Number** — not the device
 serial or ESN. Verizon does not populate that field automatically; it has to be
 set per vehicle in Reveal or nothing matches.

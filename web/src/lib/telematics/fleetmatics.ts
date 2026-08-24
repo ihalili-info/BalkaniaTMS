@@ -342,3 +342,144 @@ export function isNewerFix(
     new Date(stored.recordedAt).getTime()
   );
 }
+
+/* --- fleet sync: pulling the vehicle list ------------------------------------ */
+
+/**
+ * Reveal's vehicle list, from the Customer Meta Data API.
+ *
+ * `GET /cmd/v1/vehicles` — confirmed to exist on this account by probing
+ * (a bogus path returns 404, this returns 401 asking for the app id).
+ *
+ * The exact response field names are **not publicly documented**, so this is
+ * deliberately tolerant: it tries the plausible spellings and hands back the
+ * raw record alongside, so the mapping can be confirmed against a real payload
+ * instead of assumed. Nothing is written until a human has seen the preview.
+ */
+
+export interface RevealVehicle {
+  /** The identifier everything keys on. Stored as `trucks.gps_device_id`. */
+  vehicleNumber: string;
+  name: string | null;
+  registration: string | null;
+  make: string | null;
+  model: string | null;
+  year: number | null;
+  vin: string | null;
+  /** The untouched record, so an unexpected shape is visible rather than lost. */
+  raw: Record<string, unknown>;
+}
+
+/** Case-insensitive lookup across several candidate keys. */
+function pick(row: Record<string, unknown>, ...names: string[]): unknown {
+  const lower = new Map(
+    Object.entries(row).map(([k, v]) => [k.toLowerCase().replace(/[^a-z0-9]/g, ""), v]),
+  );
+  for (const name of names) {
+    const hit = lower.get(name.toLowerCase().replace(/[^a-z0-9]/g, ""));
+    if (hit !== undefined && hit !== null && hit !== "") return hit;
+  }
+  return undefined;
+}
+
+const str = (v: unknown): string | null =>
+  typeof v === "string" && v.trim() !== ""
+    ? v.trim()
+    : typeof v === "number"
+      ? String(v)
+      : null;
+
+export function normaliseVehicle(
+  row: Record<string, unknown>,
+): RevealVehicle | null {
+  const vehicleNumber = str(
+    pick(row, "VehicleNumber", "Number", "vehicle_number", "VehicleNo", "Id"),
+  );
+  // Without the Vehicle Number there is nothing for the GPS webhook to match,
+  // so the record is useless to us rather than partially useful.
+  if (!vehicleNumber) return null;
+
+  const yearRaw = pick(row, "Year", "ModelYear");
+
+  return {
+    vehicleNumber,
+    name: str(pick(row, "Name", "VehicleName", "Label", "DisplayName")),
+    registration: str(
+      pick(row, "RegistrationNumber", "Registration", "LicensePlate", "Plate", "Tag"),
+    ),
+    make: str(pick(row, "Make", "Manufacturer")),
+    model: str(pick(row, "Model")),
+    year:
+      typeof yearRaw === "number"
+        ? yearRaw
+        : typeof yearRaw === "string" && /^\d{4}$/.test(yearRaw)
+          ? Number(yearRaw)
+          : null,
+    vin: str(pick(row, "VIN", "Vin", "ChassisNumber")),
+    raw: row,
+  };
+}
+
+export interface VehicleFetchResult {
+  vehicles: RevealVehicle[];
+  /** Records Reveal returned that had no usable Vehicle Number. */
+  unusable: number;
+  /** First raw record, so an unfamiliar shape can be inspected. */
+  sample: Record<string, unknown> | null;
+}
+
+export async function fetchVehicles(
+  config: FleetmaticsConfig,
+): Promise<VehicleFetchResult> {
+  const token = await getToken(config);
+  const response = await fetch(
+    `${apiBase(config.environment)}/cmd/v1/vehicles`,
+    {
+      headers: {
+        Authorization: authHeader(config, token),
+        Accept: "application/json",
+      },
+      cache: "no-store",
+    },
+  );
+
+  if (response.status === 401) {
+    invalidateToken();
+    const body = await response.text();
+    throw new Error(
+      body.includes("atmosphere_app_id")
+        ? "Reveal rejected the request: no App ID. Set FLEETMATICS_APP_ID from the developer portal."
+        : `Reveal rejected the token (401): ${body.slice(0, 200)}`,
+    );
+  }
+  if (!response.ok) {
+    throw new Error(
+      `Reveal vehicle list failed: ${response.status} ${response.statusText}`,
+    );
+  }
+
+  const payload: unknown = await response.json();
+
+  // Accept a bare array or a wrapped collection — both shapes are common and
+  // the docs do not say which this endpoint uses.
+  const rows: unknown[] = Array.isArray(payload)
+    ? payload
+    : Array.isArray((payload as { Vehicles?: unknown[] })?.Vehicles)
+      ? (payload as { Vehicles: unknown[] }).Vehicles
+      : Array.isArray((payload as { items?: unknown[] })?.items)
+        ? (payload as { items: unknown[] }).items
+        : [];
+
+  const records = rows.filter(
+    (r): r is Record<string, unknown> => typeof r === "object" && r !== null,
+  );
+  const vehicles = records
+    .map(normaliseVehicle)
+    .filter((v): v is RevealVehicle => v !== null);
+
+  return {
+    vehicles,
+    unusable: records.length - vehicles.length,
+    sample: records[0] ?? null,
+  };
+}

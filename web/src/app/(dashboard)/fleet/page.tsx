@@ -10,6 +10,7 @@ import {
 } from "@/lib/data/fleet";
 
 import { FleetTabs } from "./fleet-tabs";
+import { RevealSync } from "./reveal-sync";
 import type { Assignment } from "./fleet-manager";
 import type { DriverAssignment } from "./drivers-panel";
 
@@ -57,9 +58,9 @@ export default async function FleetPage() {
         actions={
           <>
             <Button icon="download">Export fleet</Button>
-            <Button variant="primary" icon="add">
-              Add truck
-            </Button>
+            {/* The fleet comes from Reveal — typing plates in by hand would
+                risk a Vehicle Number the GPS webhook cannot match. */}
+            <RevealSync />
           </>
         }
       />
