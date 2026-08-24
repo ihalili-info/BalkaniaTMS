@@ -1,5 +1,8 @@
 /**
- * Google Maps basemap configuration.
+ * Google Maps basemap — the browser side.
+ *
+ * Where the key comes from is `maps.server.ts`; this module only loads the API
+ * with whatever key it was handed.
  *
  * **This key reaches the browser.** The Maps JavaScript API is loaded by the
  * client and authenticates with the key in the script URL — there is no way to
@@ -22,11 +25,6 @@
 
 /** Where the map opens before it has anything to fit — the Ballymount depot. */
 export const MAP_DEFAULT_ZOOM = 7;
-
-export function googleMapsKey(): string | null {
-  const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim();
-  return key ? key : null;
-}
 
 let pending: Promise<typeof google.maps> | null = null;
 

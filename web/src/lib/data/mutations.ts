@@ -583,3 +583,95 @@ export async function deleteLoad(loadId: string): Promise<WriteResult> {
     return { ok: false, message: (e as Error).message };
   }
 }
+
+/* --- deleting orders --------------------------------------------------------- */
+
+export interface DeleteOrdersResult extends WriteResult {
+  deleted: number;
+  /** Orders left alone, with the reason, so nothing disappears silently. */
+  blocked: { id: string; reason: string }[];
+}
+
+/**
+ * Removes orders from the queue permanently.
+ *
+ * **The FK would happily do more than asked.** `load_items.order_id` is
+ * `ON DELETE CASCADE`, and `notifications.load_item_id` cascades from *that* —
+ * so a plain `DELETE FROM orders` takes the stop and every alert ever sent for
+ * it with it. That is the record of a delivery having happened and of a
+ * customer having been told about it, and it is not ours to erase as a side
+ * effect of tidying a queue.
+ *
+ * So only an order that is **pending and on no load** is deletable. Anything
+ * else comes back in `blocked` with the reason; the caller shows that before
+ * asking for confirmation, so a partial delete is a stated outcome rather than
+ * a surprise. Take the order off its load first if you really mean it — that
+ * path already refuses to drop a delivered stop.
+ */
+export async function deleteOrders(ids: string[]): Promise<DeleteOrdersResult> {
+  const empty = { deleted: 0, blocked: [] as { id: string; reason: string }[] };
+  try {
+    await requireSession();
+    if (ids.length === 0) {
+      return { ok: false, message: "Nothing selected.", ...empty };
+    }
+
+    const supabase = await createClient();
+
+    const { data: orders, error: readError } = await supabase
+      .from("orders")
+      .select("id, crm_order_id, status")
+      .in("id", ids);
+    if (readError) return { ok: false, message: readError.message, ...empty };
+
+    // One query rather than one per order: which of these are on a load at all.
+    const { data: items, error: itemError } = await supabase
+      .from("load_items")
+      .select("order_id")
+      .in("order_id", ids);
+    if (itemError) return { ok: false, message: itemError.message, ...empty };
+
+    const onALoad = new Set((items ?? []).map((i) => i.order_id as string));
+
+    const blocked: { id: string; reason: string }[] = [];
+    const deletable: string[] = [];
+
+    for (const order of orders ?? []) {
+      const label = order.crm_order_id ?? order.id;
+      if (order.status === "delivered") {
+        blocked.push({ id: label, reason: "already delivered" });
+      } else if (onALoad.has(order.id)) {
+        blocked.push({ id: label, reason: "on a load — remove it from the load first" });
+      } else {
+        deletable.push(order.id);
+      }
+    }
+
+    if (deletable.length === 0) {
+      return {
+        ok: false,
+        message: "Nothing here can be deleted.",
+        deleted: 0,
+        blocked,
+      };
+    }
+
+    const { error } = await supabase.from("orders").delete().in("id", deletable);
+    if (error) return { ok: false, message: error.message, deleted: 0, blocked };
+
+    revalidatePath("/orders-queue");
+    revalidatePath("/active-loads");
+
+    return {
+      ok: true,
+      message:
+        blocked.length === 0
+          ? `${deletable.length} order${deletable.length === 1 ? "" : "s"} deleted.`
+          : `${deletable.length} deleted, ${blocked.length} kept.`,
+      deleted: deletable.length,
+      blocked,
+    };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message, ...empty };
+  }
+}

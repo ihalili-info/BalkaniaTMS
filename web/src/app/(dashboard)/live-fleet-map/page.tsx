@@ -8,7 +8,7 @@ import {
   getTrucks,
   stopsInGeofence,
 } from "@/lib/data/fleet";
-import { googleMapsKey } from "@/lib/maps";
+import { MAPS_KEY_VARS, googleMapsKey } from "@/lib/maps.server";
 import { SyncGpsButton } from "@/components/sync-gps";
 
 import { FleetMap } from "./fleet-map";
@@ -77,18 +77,31 @@ export default async function LiveFleetMapPage() {
 
       {!mapsKey ? (
         <div className="mt-4 flex items-start gap-3 rounded-lg border border-hairline bg-surface px-4 py-3 shadow-card">
-          <Icon name="info" className="mt-0.5 text-[18px] text-ink-subtle" />
-          <p className="text-body-sm text-ink-muted">
-            No basemap: this is a schematic projection. Coordinates and the 5 km
-            geofence rings are to true scale, but there is no road network. Set{" "}
-            <code className="font-mono text-data-sm text-ink">
-              NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
-            </code>{" "}
-            to a browser key with the Maps JavaScript API enabled and an HTTP
-            referrer restriction, and this becomes a Google map. Keep it separate
-            from the server-side geocoding key — this one is visible in page
-            source.
-          </p>
+          <Icon name="map" className="mt-0.5 text-[18px] text-ink-subtle" />
+          <div className="text-body-sm text-ink-muted">
+            <p>
+              <strong className="text-ink">No basemap.</strong> This is a
+              schematic projection — coordinates and the 5 km geofence rings are
+              to true scale, but there is no road network. Neither of these is
+              set on this deployment:
+            </p>
+            <ul className="my-1.5 space-y-0.5">
+              {MAPS_KEY_VARS.map((name) => (
+                <li key={name} className="font-mono text-data-sm text-ink">
+                  {name}
+                </li>
+              ))}
+            </ul>
+            <p>
+              Set either to a Google browser key with the{" "}
+              <em>Maps JavaScript API</em> enabled, and the map switches over.
+              The <span className="font-mono text-data-sm">NEXT_PUBLIC_</span>{" "}
+              one is compiled in, so it needs a redeploy to take effect; the
+              other is read per request. Either way the key is visible in page
+              source, so restrict it by HTTP referrer and keep it separate from{" "}
+              <span className="font-mono text-data-sm">GEOCODING_API_KEY</span>.
+            </p>
+          </div>
         </div>
       ) : null}
 

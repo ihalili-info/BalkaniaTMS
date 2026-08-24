@@ -347,6 +347,18 @@ personal data with a retention window.
 most of the mainland 4.00 m — so a legal Irish trailer can be illegal in France.
 `vehicleBreaches()` catches that, and the Fleet cards surface it.
 
+## Deleting orders
+
+`deleteOrders` in `lib/data/mutations.ts`, behind the red **Delete** in the
+Orders Queue selection bar.
+
+`load_items.order_id` is `ON DELETE CASCADE` and `notifications.load_item_id`
+cascades from that, so a plain `DELETE FROM orders` silently takes the stop and
+every alert ever sent for it. Only an order that is **pending and on no load**
+is deletable; anything else comes back in `blocked` with a reason. The confirm
+dialog evaluates the same rule client-side first, so a partial delete is an
+outcome the dispatcher has read, not a surprise.
+
 ## Loads: editing and deleting
 
 `updateLoad` / `deleteLoad` in `lib/data/mutations.ts`, surfaced by the `⋯`

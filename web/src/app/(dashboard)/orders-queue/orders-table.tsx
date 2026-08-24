@@ -22,6 +22,8 @@ import { DEPOT } from "@/lib/geo/reference";
 import { customsRegime } from "@/lib/regions";
 import type { Order, OrderStatus } from "@/lib/types";
 
+import { DeleteOrdersDialog } from "./delete-orders-dialog";
+
 type Filter = "all" | OrderStatus;
 
 const FILTERS: { key: Filter; label: string }[] = [
@@ -47,6 +49,7 @@ export function OrdersTable({
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
+  const [deleting, setDeleting] = useState(false);
 
   const counts = useMemo(() => {
     const map: Record<Filter, number> = {
@@ -129,9 +132,16 @@ export function OrdersTable({
             {selected.length} order{selected.length === 1 ? "" : "s"} selected
           </span>
           <Button
+            variant="danger"
+            icon="delete"
+            className="ml-auto"
+            onClick={() => setDeleting(true)}
+          >
+            Delete
+          </Button>
+          <Button
             variant="primary"
             icon="add_road"
-            className="ml-auto"
             onClick={() => setSelected([])}
           >
             Assign to load
@@ -140,6 +150,18 @@ export function OrdersTable({
             Clear
           </Button>
         </div>
+      ) : null}
+
+      {deleting ? (
+        <DeleteOrdersDialog
+          orders={orders.filter((o) => selected.includes(o.id))}
+          loadRefByOrderId={loadRefByOrderId}
+          onClose={() => setDeleting(false)}
+          onDeleted={() => {
+            setDeleting(false);
+            setSelected([]);
+          }}
+        />
       ) : null}
 
       {visible.length === 0 ? (
