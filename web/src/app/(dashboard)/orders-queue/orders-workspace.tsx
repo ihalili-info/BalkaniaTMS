@@ -6,7 +6,7 @@ import { Badge, Button, Icon, StatTile } from "@/components/ui";
 import { fixOrderAddress, importOrders } from "@/lib/data/mutations";
 import { relativeTime } from "@/lib/format";
 import type { CountryCode } from "@/lib/regions";
-import type { LatLng, Order } from "@/lib/types";
+import type { LatLng, Order, Truck } from "@/lib/types";
 
 import { FixAddressesDialog } from "./fix-addresses-dialog";
 import { ImportDialog } from "./import-dialog";
@@ -21,10 +21,16 @@ import { OrdersTable } from "./orders-table";
  */
 export function OrdersWorkspace({
   initialOrders,
+  trucks,
   loadRefByOrderId,
+  geocodingReady,
 }: {
   initialOrders: Order[];
+  /** Needed by Auto-plan, which suggests a truck per group. */
+  trucks: Truck[];
   loadRefByOrderId: Record<string, string>;
+  /** Whether GEOCODING_API_KEY is set, so the UI can say so rather than fail. */
+  geocodingReady: boolean;
 }) {
   // One clock for the render, so relative times inside it agree.
   const [now] = useState(() => new Date());
@@ -235,8 +241,10 @@ export function OrdersWorkspace({
 
       <OrdersTable
         orders={orders}
+        trucks={trucks}
         loadRefByOrderId={loadRefByOrderId}
         importedIds={importedIds}
+        geocodingReady={geocodingReady}
         onFixAddress={(id) => setFixing({ startWith: id })}
       />
 

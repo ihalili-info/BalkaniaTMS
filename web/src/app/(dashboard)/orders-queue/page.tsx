@@ -1,14 +1,24 @@
 import type { Metadata } from "next";
 
 import { Button, Page, PageHeader } from "@/components/ui";
-import { getLoads, getOrders, loadRefByOrderId } from "@/lib/data/fleet";
+import {
+  getLoads,
+  getOrders,
+  getTrucks,
+  loadRefByOrderId,
+} from "@/lib/data/fleet";
+import { geocodingConfigured } from "@/lib/geocoding/google";
 
 import { OrdersWorkspace } from "./orders-workspace";
 
 export const metadata: Metadata = { title: "Orders Queue" };
 
 export default async function OrdersQueuePage() {
-  const [orders, loads] = await Promise.all([getOrders(), getLoads()]);
+  const [orders, loads, trucks] = await Promise.all([
+    getOrders(),
+    getLoads(),
+    getTrucks(),
+  ]);
 
   return (
     <Page>
@@ -21,7 +31,9 @@ export default async function OrdersQueuePage() {
 
       <OrdersWorkspace
         initialOrders={orders}
+        trucks={trucks}
         loadRefByOrderId={loadRefByOrderId(loads)}
+        geocodingReady={geocodingConfigured()}
       />
     </Page>
   );

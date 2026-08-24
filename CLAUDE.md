@@ -347,6 +347,49 @@ personal data with a retention window.
 most of the mainland 4.00 m — so a legal Irish trailer can be illegal in France.
 `vehicleBreaches()` catches that, and the Fleet cards surface it.
 
+## Auto-planning loads
+
+**Auto-plan** in the Orders Queue selection bar: geocode → group by geography →
+review → create. `lib/load-planner.ts` is the whole algorithm and it is pure —
+no I/O, no clock — so it can be reasoned about and run standalone.
+
+- **Straight lines only.** Every distance is great-circle. No roads, no drive
+  times, no ferries. Two drops either side of an estuary look adjacent and are
+  an hour apart in a truck. The output is a **proposal a dispatcher reviews**,
+  never something that dispatches itself, and the dialog says so where it would
+  be easiest to forget. Real optimisation waits on the routing/ETA provider
+  that is still unchosen.
+- **Customs splits before geography.** A cluster straddling a customs boundary
+  cannot be cut in half afterwards without leaving both halves badly shaped, so
+  regimes are separated first. Mixing a GB export with a domestic drop puts two
+  paperwork regimes on one truck.
+- **Seeded from the furthest drop.** Seeding from the nearest fills the first
+  truck with easy local work and strands the remote ones.
+- **Nearest-neighbour sequencing**, chosen for being *explicable* rather than
+  optimal — a dispatcher can see why each stop follows the last and drag it
+  around if they disagree.
+- **No capacity check is possible.** `orders` carries no weight or volume, so
+  there is nothing to compare `trucks.capacity_kg` against; trucks are assigned
+  longest-run-first and the dispatcher confirms. Adding order weight would make
+  this real.
+
+## Geocoding
+
+`lib/geocoding/google.ts`, server-only, `GEOCODING_API_KEY`. Separate key from
+the basemap — this one must stay private and must have **no HTTP referrer
+restriction** (a server-side call sends no referrer).
+
+**Precision is the whole game.** Google answers "Ballymount, Dublin" with the
+centre of Ballymount and calls it success. Stored, that coordinate clusters
+convincingly and sits inside a 5 km geofence, so the proximity alert fires
+while the driver is streets away from a customer who was just told they were
+close. A wrong coordinate is worse than none, because none is visible. So
+`APPROXIMATE` results are **refused** and sent to the manual Fix address path;
+`ROOFTOP`, `RANGE_INTERPOLATED` and `GEOMETRIC_CENTER` are accepted. The
+country is checked twice — component filter plus bounding box — and Google's
+normalised address is shown back, because a match on the wrong Station Road is
+only catchable by reading it.
+
 ## Deleting orders
 
 `deleteOrders` in `lib/data/mutations.ts`, behind the red **Delete** in the

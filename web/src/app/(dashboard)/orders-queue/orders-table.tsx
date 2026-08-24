@@ -20,8 +20,9 @@ import {
 import { formatDate, formatClock } from "@/lib/format";
 import { DEPOT } from "@/lib/geo/reference";
 import { customsRegime } from "@/lib/regions";
-import type { Order, OrderStatus } from "@/lib/types";
+import type { Order, OrderStatus, Truck } from "@/lib/types";
 
+import { AutoPlanDialog } from "./auto-plan-dialog";
 import { DeleteOrdersDialog } from "./delete-orders-dialog";
 
 type Filter = "all" | OrderStatus;
@@ -36,12 +37,17 @@ const FILTERS: { key: Filter; label: string }[] = [
 
 export function OrdersTable({
   orders,
+  trucks,
   loadRefByOrderId,
   importedIds,
+  geocodingReady,
   onFixAddress,
 }: {
   orders: Order[];
+  trucks: Truck[];
   loadRefByOrderId: Record<string, string>;
+  /** GEOCODING_API_KEY present — Auto-plan says so rather than failing late. */
+  geocodingReady: boolean;
   /** Ids added by CSV import this session — marked so they are traceable. */
   importedIds?: Set<string>;
   onFixAddress?: (orderId: string) => void;
@@ -50,6 +56,7 @@ export function OrdersTable({
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [deleting, setDeleting] = useState(false);
+  const [planning, setPlanning] = useState(false);
 
   const counts = useMemo(() => {
     const map: Record<Filter, number> = {
@@ -140,6 +147,13 @@ export function OrdersTable({
             Delete
           </Button>
           <Button
+            icon="auto_awesome"
+            onClick={() => setPlanning(true)}
+            title="Group these by how close the drops are and propose loads"
+          >
+            Auto-plan
+          </Button>
+          <Button
             variant="primary"
             icon="add_road"
             onClick={() => setSelected([])}
@@ -150,6 +164,19 @@ export function OrdersTable({
             Clear
           </Button>
         </div>
+      ) : null}
+
+      {planning ? (
+        <AutoPlanDialog
+          orders={orders.filter((o) => selected.includes(o.id))}
+          trucks={trucks}
+          loadRefByOrderId={loadRefByOrderId}
+          geocodingReady={geocodingReady}
+          onClose={() => {
+            setPlanning(false);
+            setSelected([]);
+          }}
+        />
       ) : null}
 
       {deleting ? (

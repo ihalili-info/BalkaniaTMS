@@ -6,6 +6,11 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import type { CountryCode } from "@/lib/regions";
 import type { LatLng, Order, Truck } from "@/lib/types";
+import {
+  GEOCODE_MESSAGE,
+  geocodeAddress,
+  geocodingConfigured,
+} from "@/lib/geocoding/google";
 
 /**
  * Writes.
@@ -15,6 +20,15 @@ import type { LatLng, Order, Truck } from "@/lib/types";
  * RLS is the backstop underneath: a caller who gets past these still has to
  * satisfy the policies in migration 0004.
  */
+
+/**
+ * How many addresses one call will resolve.
+ *
+ * Bounded by the server action's wall clock, not by Google's quota — each
+ * lookup is a round trip, and an unbounded batch would time out mid-run with
+ * some rows written and no report of which.
+ */
+const GEOCODE_BATCH_LIMIT = 60;
 
 export interface WriteResult {
   ok: boolean;
@@ -673,5 +687,174 @@ export async function deleteOrders(ids: string[]): Promise<DeleteOrdersResult> {
     };
   } catch (e) {
     return { ok: false, message: (e as Error).message, ...empty };
+  }
+}
+
+/* --- geocoding --------------------------------------------------------------- */
+
+export interface GeocodeLine {
+  orderId: string;
+  reference: string;
+  outcome: "located" | "failed";
+  detail: string;
+}
+
+export interface GeocodeBatchResult extends WriteResult {
+  located: number;
+  lines: GeocodeLine[];
+}
+
+/**
+ * Resolves delivery addresses to coordinates.
+ *
+ * Capped and sequential. Google's per-second limit is generous but real, and a
+ * server action has a wall-clock budget — firing eighty parallel requests is
+ * the reliable way to turn a working batch into a partial one with no record
+ * of where it stopped. One at a time, reported per row, is slower and always
+ * legible.
+ *
+ * Coarse matches are **not** written. `lib/geocoding/google.ts` explains why at
+ * length; the short version is that a town-centre coordinate is invisible once
+ * stored and fires customer alerts from the wrong place.
+ */
+export async function geocodeOrders(ids: string[]): Promise<GeocodeBatchResult> {
+  const empty = { located: 0, lines: [] as GeocodeLine[] };
+  try {
+    await requireSession();
+    if (!geocodingConfigured()) {
+      return { ok: false, message: GEOCODE_MESSAGE.not_configured, ...empty };
+    }
+    if (ids.length === 0) {
+      return { ok: false, message: "Nothing selected.", ...empty };
+    }
+
+    const capped = ids.slice(0, GEOCODE_BATCH_LIMIT);
+    const supabase = await createClient();
+
+    const { data: orders, error } = await supabase
+      .from("orders")
+      .select("id, crm_order_id, delivery_address, delivery_postcode, delivery_country")
+      .in("id", capped);
+    if (error) return { ok: false, message: error.message, ...empty };
+
+    const lines: GeocodeLine[] = [];
+    let located = 0;
+
+    for (const order of orders ?? []) {
+      const result = await geocodeAddress(
+        order.delivery_address,
+        order.delivery_country,
+        order.delivery_postcode,
+      );
+
+      if (!result.point) {
+        lines.push({
+          orderId: order.id,
+          reference: order.crm_order_id,
+          outcome: "failed",
+          detail: GEOCODE_MESSAGE[result.failure ?? "no_result"],
+        });
+        continue;
+      }
+
+      const { error: writeError } = await supabase.rpc("set_order_location", {
+        p_order_id: order.id,
+        p_lat: result.point.lat,
+        p_lng: result.point.lng,
+      });
+
+      if (writeError) {
+        lines.push({
+          orderId: order.id,
+          reference: order.crm_order_id,
+          outcome: "failed",
+          detail: writeError.message,
+        });
+        continue;
+      }
+
+      located += 1;
+      lines.push({
+        orderId: order.id,
+        reference: order.crm_order_id,
+        outcome: "located",
+        // The normalised address is shown back deliberately: a match that
+        // silently landed on the wrong Station Road is only catchable by
+        // reading what Google actually resolved to.
+        detail: `${result.formatted ?? "matched"}${result.partial ? " · partial match — check it" : ""}`,
+      });
+    }
+
+    revalidatePath("/orders-queue");
+    revalidatePath("/live-fleet-map");
+
+    return {
+      ok: true,
+      message:
+        ids.length > capped.length
+          ? `${located} of ${capped.length} located. ${ids.length - capped.length} were left for a second run — batches are capped at ${GEOCODE_BATCH_LIMIT}.`
+          : null,
+      located,
+      lines,
+    };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message, ...empty };
+  }
+}
+
+/* --- committing an auto-plan -------------------------------------------------- */
+
+export interface CommitPlanResult extends WriteResult {
+  created: number;
+}
+
+/**
+ * Turns accepted proposals from the planner into real loads.
+ *
+ * Each one goes through `createLoad`, not a bulk insert, so an auto-planned
+ * load is subject to exactly the same checks as one built by hand — the order
+ * must still be unassigned, the truck must still exist. Nothing about being
+ * machine-generated earns it a shortcut.
+ *
+ * Partial success is reported rather than rolled back: if the fourth load
+ * fails because someone else grabbed an order thirty seconds ago, the three
+ * that worked are real and undoing them would be the surprising outcome.
+ */
+export async function commitPlan(
+  plan: { truckId: string; orderIds: string[]; cmrNumber: string | null }[],
+): Promise<CommitPlanResult> {
+  try {
+    await requireSession();
+    if (plan.length === 0) {
+      return { ok: false, message: "Nothing to create.", created: 0 };
+    }
+
+    let created = 0;
+    const failures: string[] = [];
+
+    for (const proposal of plan) {
+      const result = await createLoad({
+        truckId: proposal.truckId,
+        driverId: null,
+        orderIds: proposal.orderIds,
+        cmrNumber: proposal.cmrNumber,
+      });
+      if (result.ok) created += 1;
+      else failures.push(result.message ?? "unknown error");
+    }
+
+    revalidatePath("/orders-queue");
+    revalidatePath("/active-loads");
+
+    return {
+      ok: created > 0,
+      created,
+      message:
+        failures.length === 0
+          ? `${created} load${created === 1 ? "" : "s"} created as planned.`
+          : `${created} created, ${failures.length} failed: ${failures[0]}`,
+    };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message, created: 0 };
   }
 }
