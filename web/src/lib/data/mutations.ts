@@ -249,3 +249,151 @@ export async function updateDriver(
     return { ok: false, message: (e as Error).message };
   }
 }
+
+/* --- loads ------------------------------------------------------------------- */
+
+export interface CreateLoadInput {
+  truckId: string;
+  driverId: string | null;
+  /** Order ids in the sequence they are to be delivered. */
+  orderIds: string[];
+  cmrNumber: string | null;
+}
+
+/**
+ * Creates a load from unassigned orders.
+ *
+ * Order matters literally: the array index becomes `stop_sequence`, which is
+ * what the driver's route follows and what the geofence engine walks. It is
+ * not a set.
+ *
+ * Orders move to `assigned` here, which is the first of the three points the
+ * architecture doc says owns `orders.status` — the other two being the
+ * dispatch alert and `delivered_at`.
+ */
+export async function createLoad(
+  input: CreateLoadInput,
+): Promise<WriteResult & { loadId: string | null }> {
+  try {
+    await requireSession();
+
+    if (input.orderIds.length === 0) {
+      return { ok: false, message: "Pick at least one order.", loadId: null };
+    }
+
+    const supabase = await createClient();
+
+    // Refuse a truck the dispatcher has taken out of service. The UI filters
+    // these out, but a stale page could still post one.
+    const { data: truck, error: truckError } = await supabase
+      .from("trucks")
+      .select("id, license_plate, availability")
+      .eq("id", input.truckId)
+      .maybeSingle();
+
+    if (truckError) return { ok: false, message: truckError.message, loadId: null };
+    if (!truck) return { ok: false, message: "That truck no longer exists.", loadId: null };
+    if (truck.availability !== "available") {
+      return {
+        ok: false,
+        message: `${truck.license_plate} is marked ${truck.availability} and cannot be given work.`,
+        loadId: null,
+      };
+    }
+
+    // Guard against two dispatchers planning the same order into two loads.
+    const { data: alreadyOn, error: clashError } = await supabase
+      .from("load_items")
+      .select("order_id")
+      .in("order_id", input.orderIds);
+
+    if (clashError) return { ok: false, message: clashError.message, loadId: null };
+    if (alreadyOn && alreadyOn.length > 0) {
+      return {
+        ok: false,
+        message: `${alreadyOn.length} of those orders are already on a load. Refresh and try again.`,
+        loadId: null,
+      };
+    }
+
+    const { data: load, error: loadError } = await supabase
+      .from("loads")
+      .insert({
+        truck_id: input.truckId,
+        driver_id: input.driverId,
+        status: "planned",
+        cmr_number: input.cmrNumber,
+      })
+      .select("id")
+      .single();
+
+    if (loadError || !load) {
+      return { ok: false, message: loadError?.message ?? "Could not create the load.", loadId: null };
+    }
+
+    const { error: itemsError } = await supabase.from("load_items").insert(
+      input.orderIds.map((orderId, index) => ({
+        load_id: load.id,
+        order_id: orderId,
+        stop_sequence: index + 1,
+      })),
+    );
+
+    if (itemsError) {
+      // Roll back rather than leave a load with no stops on the board.
+      await supabase.from("loads").delete().eq("id", load.id);
+      return { ok: false, message: itemsError.message, loadId: null };
+    }
+
+    const { error: statusError } = await supabase
+      .from("orders")
+      .update({ status: "assigned", updated_at: new Date().toISOString() })
+      .in("id", input.orderIds);
+
+    if (statusError) {
+      return { ok: false, message: statusError.message, loadId: load.id };
+    }
+
+    revalidatePath("/active-loads");
+    revalidatePath("/orders-queue");
+    revalidatePath("/live-fleet-map");
+    return { ok: true, message: null, loadId: load.id };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message, loadId: null };
+  }
+}
+
+/** Moves a planned load onto the road. */
+export async function startLoad(loadId: string): Promise<WriteResult> {
+  try {
+    await requireSession();
+    const supabase = await createClient();
+
+    const { error } = await supabase
+      .from("loads")
+      .update({ status: "active" })
+      .eq("id", loadId);
+    if (error) return { ok: false, message: error.message };
+
+    // `en_route` is owned by the dispatch alert in the architecture doc, but
+    // nothing sends those yet; setting it here keeps the board truthful and is
+    // the line to revisit when the alert engine lands.
+    const { data: items } = await supabase
+      .from("load_items")
+      .select("order_id")
+      .eq("load_id", loadId);
+
+    if (items && items.length > 0) {
+      await supabase
+        .from("orders")
+        .update({ status: "en_route", updated_at: new Date().toISOString() })
+        .in("id", items.map((i) => i.order_id));
+    }
+
+    revalidatePath("/active-loads");
+    revalidatePath("/orders-queue");
+    return { ok: true, message: null };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+}

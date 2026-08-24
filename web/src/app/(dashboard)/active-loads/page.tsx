@@ -6,6 +6,7 @@ import {
   Card,
   CardHeader,
   CustomsBadge,
+  EmptyState,
   DriverHoursBadge,
   DriverHoursBar,
   Icon,
@@ -21,8 +22,11 @@ import {
 import {
   GEOFENCE_RADIUS_M,
   activeOf,
+  getDrivers,
   getLoads,
+  getOrders,
   getRecentAlerts,
+  getTrucks,
   loadProgress,
   plannedOf,
   stopsInGeofence,
@@ -45,6 +49,8 @@ import {
 } from "@/lib/navigation-links";
 import { CUSTOMS_REGIME } from "@/lib/regions";
 
+import { DispatchActions } from "./dispatch-actions";
+import { StartLoadButton } from "./start-load";
 import { RouteActions, StopNavMenu } from "./route-actions";
 import type { LatLng, LoadView, Stop } from "@/lib/types";
 
@@ -328,6 +334,13 @@ export default async function ActiveLoadsPage() {
   const activeLoads = activeOf(loads);
   const plannedLoads = plannedOf(loads);
   const alertLog = await getRecentAlerts(loads);
+  const [trucks, drivers, orders] = await Promise.all([
+    getTrucks(),
+    getDrivers(),
+    getOrders(),
+  ]);
+  const onALoad = new Set(loads.flatMap((l) => l.stops.map((s) => s.order_id)));
+  const unassignedOrders = orders.filter((o) => !onALoad.has(o.id));
 
   const stopsRemaining = activeLoads.reduce(
     (n, l) => n + l.stops.filter((s) => s.delivered_at === null).length,
@@ -354,12 +367,11 @@ export default async function ActiveLoadsPage() {
         title="Active Loads"
         description={`Every load on the road, its stop sequence, driving time left under Reg. 561/2006, and how close each truck is to its next drop. ${crossBorderLoads} of ${activeLoads.length} are cross-border.`}
         actions={
-          <>
-            <Button icon="refresh">Sync GPS</Button>
-            <Button variant="primary" icon="add">
-              Plan load
-            </Button>
-          </>
+          <DispatchActions
+            trucks={trucks}
+            drivers={drivers}
+            unassignedOrders={unassignedOrders}
+          />
         }
       />
 
@@ -415,6 +427,53 @@ export default async function ActiveLoadsPage() {
 
       <div className="grid gap-4 xl:grid-cols-3">
         <div className="space-y-4 xl:col-span-2">
+          {plannedLoads.length > 0 ? (
+            <Card>
+              <CardHeader
+                title="Planned"
+                hint="Not on the road yet — start a load when the truck leaves"
+              />
+              <ul className="divide-y divide-hairline">
+                {plannedLoads.map((load) => (
+                  <li
+                    key={load.id}
+                    className="flex flex-wrap items-center gap-3 px-5 py-3"
+                  >
+                    <Icon
+                      name="schedule"
+                      className="text-[18px] text-ink-subtle"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-body-sm text-ink">
+                          {load.reference}
+                        </span>
+                        <CustomsBadge regime={load.customs_regime} />
+                      </span>
+                      <span className="block truncate text-caption text-ink-subtle">
+                        {load.truck?.license_plate ?? "no truck"} ·{" "}
+                        {load.driver?.full_name ?? "no driver"} ·{" "}
+                        {load.stops.length} stop
+                        {load.stops.length === 1 ? "" : "s"}
+                      </span>
+                    </span>
+                    <StartLoadButton loadId={load.id} />
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          ) : null}
+
+          {activeLoads.length === 0 && plannedLoads.length === 0 ? (
+            <Card>
+              <EmptyState
+                icon="local_shipping"
+                title="Nothing on the road"
+                description="Plan a load from the orders waiting in the queue. Pick a truck, choose the stops, set their order — that is the route the driver runs."
+              />
+            </Card>
+          ) : null}
+
           {activeLoads.map((load) => (
             <LoadCard key={load.id} load={load} now={now} />
           ))}
