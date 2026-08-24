@@ -87,7 +87,7 @@ export const CONNECTORS: Connector[] = [
     ],
     secrets: ["FLEETMATICS_PASSWORD", "GPS_WEBHOOK_SECRET"],
     endpoint: "POST /api/webhooks/gps",
-    note: "Register the endpoint through Reveal (Admin → Integrations); the Basic-auth username and password are ours to choose.",
+    note: "The username and password below are the Reveal INTEGRATION USER from Verizon — not your developer-portal login. Mixing them up is the usual cause of a 401 on the token call. The webhook Basic-auth pair is separate again, and ours to choose.",
     fields: [
       {
         key: "environment",
@@ -103,8 +103,8 @@ export const CONNECTORS: Connector[] = [
         key: "app_id",
         label: "Atmosphere App ID",
         kind: "text",
-        help: "From the Reveal developer portal. Sent as atmosphere_app_id on every RAD call — without it they return 401. An identifier, not a secret.",
-        placeholder: "0000aaaa-1111-2222-3333-444455556666",
+        help: "Developer portal → profile icon → My Apps → your app. Sent as atmosphere_app_id on every data call; without it they return 401. An identifier, not a secret.",
+        placeholder: "fleetmatics-p-eu-XXXXXXXX",
       },
       {
         key: "poll_interval_minutes",

@@ -108,6 +108,9 @@ export async function getToken(config: FleetmaticsConfig): Promise<string> {
       // that does not take it. Every RAD call afterwards does, and fails 401
       // with "Required Header Parameter Missing: atmosphere_app_id" without it.
       Authorization: `Basic ${basic}`,
+      // The Quick Start Guide says application/json here; the sample-code page
+      // says text/plain. Tested against the live EU tenant: both return the
+      // same bare JWT, never JSON-wrapped. text/plain matches what arrives.
       Accept: "text/plain",
     },
     cache: "no-store",
