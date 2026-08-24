@@ -165,3 +165,87 @@ export async function fixOrderAddress(
     return { ok: false, message: (e as Error).message };
   }
 }
+
+/* --- drivers ----------------------------------------------------------------- */
+
+export interface DriverInput {
+  full_name: string;
+  phone: string | null;
+  home_country: CountryCode;
+  tachograph_card_no: string | null;
+  cpc_expires_on: string | null;
+  driving_licence_no: string | null;
+}
+
+/**
+ * Fields a dispatcher owns.
+ *
+ * The Reg. 561/2006 duty counters are deliberately absent. They are written by
+ * the tachograph sync and nothing else: a hand-typed "hours driven today" would
+ * look identical to a real reading while carrying none of its authority, and
+ * the tachograph is the legal record.
+ */
+function driverFields(input: DriverInput) {
+  return {
+    full_name: input.full_name.trim(),
+    phone: input.phone?.trim() || null,
+    home_country: input.home_country,
+    tachograph_card_no: input.tachograph_card_no?.trim() || null,
+    cpc_expires_on: input.cpc_expires_on || null,
+    driving_licence_no: input.driving_licence_no?.trim() || null,
+  };
+}
+
+export async function createDriver(input: DriverInput): Promise<WriteResult> {
+  try {
+    await requireSession();
+    if (input.full_name.trim() === "") {
+      return { ok: false, message: "A driver needs a name." };
+    }
+    const supabase = await createClient();
+    const { error } = await supabase.from("drivers").insert(driverFields(input));
+    if (error) {
+      // The tachograph card is UNIQUE — two drivers cannot share one, and the
+      // duplicate is worth naming rather than showing a raw constraint error.
+      return {
+        ok: false,
+        message: error.message.includes("tachograph_card_no")
+          ? "That tachograph card number is already assigned to another driver."
+          : error.message,
+      };
+    }
+    revalidatePath("/fleet");
+    return { ok: true, message: null };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+}
+
+export async function updateDriver(
+  id: string,
+  input: DriverInput,
+): Promise<WriteResult> {
+  try {
+    await requireSession();
+    if (input.full_name.trim() === "") {
+      return { ok: false, message: "A driver needs a name." };
+    }
+    const supabase = await createClient();
+    const { error } = await supabase
+      .from("drivers")
+      .update(driverFields(input))
+      .eq("id", id);
+    if (error) {
+      return {
+        ok: false,
+        message: error.message.includes("tachograph_card_no")
+          ? "That tachograph card number is already assigned to another driver."
+          : error.message,
+      };
+    }
+    revalidatePath("/fleet");
+    return { ok: true, message: null };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+}

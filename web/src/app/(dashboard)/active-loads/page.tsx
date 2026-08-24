@@ -183,7 +183,8 @@ function LoadCard({ load, now }: { load: LoadView; now: Date }) {
   const { done, total } = loadProgress(load);
   const nextIndex = load.stops.findIndex((s) => s.delivered_at === null);
 
-  const hours = load.driver ? driverHours(load.driver) : null;
+  const hasDutyData = load.driver?.duty_synced_at != null;
+  const hours = load.driver && hasDutyData ? driverHours(load.driver) : null;
   const nextStop = nextIndex === -1 ? null : load.stops[nextIndex];
   // Can this driver legally still reach the next drop? Straight-line ETA, so
   // a planning aid — the tachograph remains the legal record.
@@ -231,7 +232,8 @@ function LoadCard({ load, now }: { load: LoadView; now: Date }) {
         </div>
       </div>
 
-      {hours && load.driver ? (
+      {load.driver ? (
+        hours ? (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-hairline bg-surface-muted px-5 py-2.5">
           <div className="flex items-center gap-2">
             <Icon name="badge" className="text-[17px] text-ink-subtle" />
@@ -269,6 +271,19 @@ function LoadCard({ load, now }: { load: LoadView; now: Date }) {
 
           <DriverHoursBadge level={hours.level} label={hours.headline} />
         </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2 border-b border-hairline bg-surface-muted px-5 py-2.5">
+            <Icon name="badge" className="text-[17px] text-ink-subtle" />
+            <span className="text-body-sm text-ink">{load.driver.full_name}</span>
+            <span className="font-mono text-data-sm text-ink-subtle">
+              {load.driver.tachograph_card_no ?? "no tacho card"}
+            </span>
+            <span className="ml-auto flex items-center gap-1.5 text-caption text-ink-subtle">
+              <Icon name="gavel" className="text-[15px]" />
+              Driving time unknown — no tachograph feed
+            </span>
+          </div>
+        )
       ) : null}
 
       {paperwork.length > 0 ? (
@@ -321,8 +336,12 @@ export default async function ActiveLoadsPage() {
   const inGeofence = stopsInGeofence(loads);
   const midnight = now.toISOString().slice(0, 10);
   const alertsToday = alertLog.filter((a) => a.sent_at >= midnight);
-  const hoursAtRisk = activeLoads.filter(
-    (l) => l.driver !== null && driverHours(l.driver).level !== "ok",
+  // Only drivers with a real tachograph reading can be judged against a limit.
+  const loadsWithDuty = activeLoads.filter(
+    (l) => l.driver !== null && l.driver.duty_synced_at !== null,
+  );
+  const hoursAtRisk = loadsWithDuty.filter(
+    (l) => driverHours(l.driver!).level !== "ok",
   ).length;
   const crossBorderLoads = activeLoads.filter(
     (l) => l.customs_regime !== "domestic",
@@ -375,14 +394,22 @@ export default async function ActiveLoadsPage() {
         />
         <StatTile
           label="Hours attention"
-          value={hoursAtRisk}
+          value={loadsWithDuty.length === 0 ? "—" : hoursAtRisk}
           hint={
-            hoursAtRisk === 0
-              ? "All drivers clear under Reg. 561/2006"
-              : "Break or daily limit close"
+            loadsWithDuty.length === 0
+              ? "No tachograph feed connected"
+              : hoursAtRisk === 0
+                ? "All drivers clear under Reg. 561/2006"
+                : "Break or daily limit close"
           }
           icon="gavel"
-          tone={hoursAtRisk > 0 ? "danger" : "ok"}
+          tone={
+            loadsWithDuty.length === 0
+              ? "neutral"
+              : hoursAtRisk > 0
+                ? "danger"
+                : "ok"
+          }
         />
       </div>
 
