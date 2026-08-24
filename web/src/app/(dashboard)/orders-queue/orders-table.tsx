@@ -20,9 +20,9 @@ import {
 import { formatDate, formatClock } from "@/lib/format";
 import { DEPOT } from "@/lib/geo/reference";
 import { customsRegime } from "@/lib/regions";
+import { AutoPlanDialog } from "@/components/auto-plan-dialog";
 import type { Order, OrderStatus, Truck } from "@/lib/types";
 
-import { AutoPlanDialog } from "./auto-plan-dialog";
 import { DeleteOrdersDialog } from "./delete-orders-dialog";
 
 type Filter = "all" | OrderStatus;

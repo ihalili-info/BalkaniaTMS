@@ -48,6 +48,8 @@ import {
 } from "@/lib/navigation-links";
 import { CUSTOMS_REGIME } from "@/lib/regions";
 
+import { geocodingConfigured } from "@/lib/geocoding/google";
+
 import { DispatchActions } from "./dispatch-actions";
 import { LoadMenu } from "./load-menu";
 import { StartLoadButton } from "./start-load";
@@ -388,6 +390,7 @@ export default async function ActiveLoadsPage() {
             trucks={trucks}
             drivers={drivers}
             unassignedOrders={unassignedOrders}
+            geocodingReady={geocodingConfigured()}
           />
         }
       />
