@@ -29,6 +29,16 @@ export interface AppUser {
   depot: string;
   /** True while running on fixtures with no real session. */
   isDemo: boolean;
+  /**
+   * Why the role is what it is.
+   *
+   * `missing` and `error` both fall back to `dispatcher`, which is the safe
+   * behaviour — but silently. Without this flag "you are a dispatcher" and
+   * "we could not read your profile" look identical from the UI, and the
+   * second one is a broken deployment rather than a permission decision.
+   */
+  profileStatus: "ok" | "missing" | "error" | "demo";
+  profileError: string | null;
 }
 
 const DEMO_PROFILE: Record<Role, { id: string; fullName: string }> = {
@@ -57,6 +67,8 @@ async function demoUser(): Promise<AppUser> {
     role,
     depot: "Ballymount Terminal, Dublin",
     isDemo: true,
+    profileStatus: "demo",
+    profileError: null,
   };
 }
 
@@ -76,14 +88,29 @@ export async function getCurrentUser(): Promise<AppUser | null> {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: profile } = await supabase
+  const { data: profile, error } = await supabase
     .from("profiles")
     .select("full_name, role, depot")
     .eq("id", user.id)
     .maybeSingle();
 
-  // A signed-in user with no profile row means the backfill in migration 0004
-  // did not run. Fail closed rather than inventing a role.
+  // Fail closed, but never silently. A signed-in user with no profile row
+  // usually means the backfill in migration 0004 did not run — the signup
+  // trigger only fires on INSERT, so anyone created in the dashboard before
+  // that migration has no row, and lands here looking like a dispatcher.
+  let profileStatus: AppUser["profileStatus"] = "ok";
+  if (error) {
+    profileStatus = "error";
+    console.error(
+      `[auth] could not read profiles for ${user.email}: ${error.message}`,
+    );
+  } else if (!profile) {
+    profileStatus = "missing";
+    console.warn(
+      `[auth] no profiles row for ${user.email} (${user.id}) — defaulting to ${DEFAULT_ROLE}. Run supabase/bootstrap_profiles.sql.`,
+    );
+  }
+
   const role: Role = isRole(profile?.role) ? profile.role : DEFAULT_ROLE;
 
   return {
@@ -93,6 +120,8 @@ export async function getCurrentUser(): Promise<AppUser | null> {
     role,
     depot: profile?.depot ?? "Balkania",
     isDemo: false,
+    profileStatus,
+    profileError: error?.message ?? null,
   };
 }
 

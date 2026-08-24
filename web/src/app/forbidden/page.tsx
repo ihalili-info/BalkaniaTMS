@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { Card, Icon } from "@/components/ui";
+import { ProfileWarning } from "@/components/profile-warning";
 import { requireUser } from "@/lib/auth/session";
 import { ROLES, moduleForPath, modulesFor } from "@/lib/auth/roles";
 
@@ -16,7 +17,9 @@ export default async function ForbiddenPage({
   const allowed = modulesFor(user.role);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-canvas px-6">
+    <div className="min-h-screen bg-canvas">
+      <ProfileWarning user={user} />
+      <div className="flex min-h-screen items-center justify-center px-6">
       <Card className="w-full max-w-lg">
         <div className="flex items-start gap-4 border-b border-hairline px-6 py-5">
           <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-warn-soft text-warn">
@@ -58,6 +61,7 @@ export default async function ForbiddenPage({
           </p>
         </div>
       </Card>
+      </div>
     </div>
   );
 }
