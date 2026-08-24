@@ -99,6 +99,17 @@ export function GpsFeedCard({
         {health.diagnosis}
       </p>
 
+      {health.untrustedSubscribeHost ? (
+        <p className="flex items-start gap-2 border-t border-hairline bg-surface-muted px-5 py-3 text-caption text-ink-muted">
+          <Icon name="shield" className="mt-px text-[15px] text-ink-subtle" />
+          <span>
+            A confirmation arrived pointing at{" "}
+            <span className="font-mono">{health.untrustedSubscribeHost}</span>.
+            Not a Verizon or AWS host, so it was neither fetched nor linked.
+          </span>
+        </p>
+      ) : null}
+
       {health.pendingSubscribeUrl ? (
         <div className="border-t border-warn-border bg-warn-soft px-5 py-4">
           <p className="mb-2 text-body-sm font-medium text-ink">

@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { isConfirmableUrl } from "@/lib/telematics/subscription";
 
 /** Diagnostic view of the Reveal GPS webhook. */
 
@@ -27,8 +28,17 @@ export interface GpsFeedHealth {
   unmatchedNumbers: string[];
   trucksTotal: number;
   trucksWithFix: number;
-  /** Set when a handshake arrived but could not be completed automatically. */
+  /**
+   * A pending SubscribeURL that is safe to offer as a link.
+   *
+   * Only ever set when the host is a recognised Verizon or AWS one. Offering
+   * an admin a one-click link to whatever URL happened to arrive in a request
+   * body would turn this diagnostic panel into a phishing surface — the whole
+   * point of the allow-list is that an unrecognised host is not trustworthy.
+   */
   pendingSubscribeUrl: string | null;
+  /** A confirmation arrived whose URL we will not link to. */
+  untrustedSubscribeHost: string | null;
   /** Plain-English next step, derived from what the log actually shows. */
   diagnosis: string;
 }
@@ -67,9 +77,22 @@ export async function getGpsFeedHealth(): Promise<GpsFeedHealth> {
   // Each cause needs a different fix, so name the one the evidence supports
   // rather than offering a checklist.
   let diagnosis: string;
-  if (pending && !confirmed) {
+  const pendingUrl = pending?.subscribe_url ?? null;
+  const pendingTrusted = pendingUrl !== null && isConfirmableUrl(pendingUrl);
+  let untrustedSubscribeHost: string | null = null;
+  if (pendingUrl && !pendingTrusted) {
+    try {
+      untrustedSubscribeHost = new URL(pendingUrl).hostname;
+    } catch {
+      untrustedSubscribeHost = "unparseable URL";
+    }
+  }
+
+  if (pending && !confirmed && pendingTrusted) {
     diagnosis =
       "Verizon sent the subscription confirmation but it could not be completed automatically. Open the SubscribeURL below to activate the feed — the submission expires three days after it was made.";
+  } else if (pending && !confirmed) {
+    diagnosis = `A subscription confirmation arrived pointing at ${untrustedSubscribeHost}, which is not a Verizon or AWS host. It was not fetched and is not linked here. If you did not expect this, ignore it — a genuine confirmation comes from Verizon's own domain.`;
   } else if (rows.length === 0) {
     diagnosis =
       trucksTotal === 0
@@ -99,7 +122,8 @@ export async function getGpsFeedHealth(): Promise<GpsFeedHealth> {
     unmatchedNumbers,
     trucksTotal,
     trucksWithFix,
-    pendingSubscribeUrl: confirmed ? null : (pending?.subscribe_url ?? null),
+    pendingSubscribeUrl: confirmed || !pendingTrusted ? null : pendingUrl,
+    untrustedSubscribeHost: confirmed ? null : untrustedSubscribeHost,
     diagnosis,
   };
 }
