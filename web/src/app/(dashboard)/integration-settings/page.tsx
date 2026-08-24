@@ -9,32 +9,27 @@ import {
   Page,
   PageHeader,
   Progress,
-  type Tone,
 } from "@/components/ui";
 import { requireAccess } from "@/lib/auth/guard";
-import {
-  connectors,
-  privacySettings,
-  type ConnectorStatus,
-} from "@/lib/demo/integrations";
+import { getCurrentUser } from "@/lib/auth/session";
+import { privacySettings } from "@/lib/demo/integrations";
+import { deriveStatus, loadConnectorStates } from "@/lib/integrations/store";
+
+import { ConnectorCard } from "./connector-card";
 
 import { AlertRules } from "./alert-rules";
 
 export const metadata: Metadata = { title: "Integration Settings" };
 
-const STATUS: Record<ConnectorStatus, { tone: Tone; label: string }> = {
-  connected: { tone: "ok", label: "Connected" },
-  configured: { tone: "brand", label: "Configured" },
-  not_configured: { tone: "warn", label: "Needs keys" },
-  not_built: { tone: "danger", label: "Not built" },
-};
-
-const ready = connectors.filter((c) => c.status === "connected").length;
-
 export default async function IntegrationSettingsPage() {
   // Admin only. The proxy redirects before this renders and RLS refuses the
   // data underneath; this is the layer that survives both being wrong.
   await requireAccess("/integration-settings");
+
+  const states = await loadConnectorStates();
+  const user = await getCurrentUser();
+  const canEdit = user !== null && !user.isDemo;
+  const ready = states.filter((s) => deriveStatus(s) === "connected").length;
 
   return (
     <Page>
@@ -59,16 +54,17 @@ export default async function IntegrationSettingsPage() {
           </span>
           <div className="min-w-0 flex-1">
             <p className="text-heading text-ink">
-              {ready} of {connectors.length} integrations live
+              {ready} of {states.length} integrations configured
             </p>
             <p className="mt-0.5 text-body-sm text-ink-muted">
-              The admin panel runs on demo fixtures until Supabase is provisioned
-              and the webhook routes are implemented.
+              {canEdit
+                ? "Settings below are editable and saved to integration_settings. Secrets stay in the environment."
+                : "Running on demo fixtures — connect Supabase to save settings."}
             </p>
             <Progress
               value={ready}
-              max={connectors.length}
-              tone={ready === connectors.length ? "ok" : "warn"}
+              max={states.length}
+              tone={ready === states.length ? "ok" : "warn"}
               className="mt-3 max-w-md"
             />
           </div>
@@ -79,68 +75,14 @@ export default async function IntegrationSettingsPage() {
       </Card>
 
       <div className="mb-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {connectors.map((connector) => {
-          const status = STATUS[connector.status];
-          return (
-            <Card key={connector.id} className="flex flex-col">
-              <div className="flex items-start gap-3 border-b border-hairline px-5 py-4">
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-md border border-hairline bg-surface-muted text-ink-muted">
-                  <Icon name={connector.icon} className="text-[19px]" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="truncate text-heading text-ink">
-                      {connector.name}
-                    </h3>
-                    <Badge tone={status.tone} dot>
-                      {status.label}
-                    </Badge>
-                  </div>
-                  <p className="mt-1 text-body-sm text-ink-muted">
-                    {connector.purpose}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex flex-1 flex-col gap-3 px-5 py-4">
-                {connector.endpoint ? (
-                  <div>
-                    <p className="mb-1 font-mono text-label uppercase text-ink-subtle">
-                      Endpoint
-                    </p>
-                    <code className="block truncate rounded-sm border border-hairline bg-surface-muted px-2 py-1.5 font-mono text-data-sm text-ink-muted">
-                      {connector.endpoint}
-                    </code>
-                  </div>
-                ) : null}
-
-                <div>
-                  <p className="mb-1.5 font-mono text-label uppercase text-ink-subtle">
-                    Environment
-                  </p>
-                  <ul className="flex flex-wrap gap-1.5">
-                    {connector.envVars.map((v) => (
-                      <li
-                        key={v}
-                        className="rounded-xs border border-hairline bg-surface-muted px-1.5 py-0.5 font-mono text-data-sm text-ink-subtle"
-                      >
-                        {v}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                {connector.note ? (
-                  <p className="text-caption text-ink-subtle">{connector.note}</p>
-                ) : null}
-
-                <Button className="mt-auto w-full justify-center" icon="settings">
-                  Configure
-                </Button>
-              </div>
-            </Card>
-          );
-        })}
+        {states.map((state) => (
+          <ConnectorCard
+            key={state.connector.id}
+            state={state}
+            status={deriveStatus(state)}
+            canEdit={canEdit}
+          />
+        ))}
       </div>
 
       <AlertRules />
