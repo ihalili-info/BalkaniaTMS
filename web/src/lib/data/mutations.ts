@@ -270,6 +270,48 @@ export async function updateDriver(
   }
 }
 
+/**
+ * Removes a driver.
+ *
+ * `loads.driver_id` and `driver_messages.driver_id` are both
+ * `ON DELETE SET NULL`, so the database would happily let this through — but
+ * a load's driver is who is named on the CMR and who the Reg. 561/2006
+ * counters belong to. Nulling that out, even on a completed load, would
+ * erase who actually ran it. So a driver with any load recorded against
+ * them, past or present, is not deletable; reassign or clear the load first.
+ */
+export async function deleteDriver(driverId: string): Promise<WriteResult> {
+  try {
+    await requireSession();
+    const supabase = await createClient();
+
+    const { count, error } = await supabase
+      .from("loads")
+      .select("id", { count: "exact", head: true })
+      .eq("driver_id", driverId);
+    if (error) return { ok: false, message: error.message };
+    if ((count ?? 0) > 0) {
+      const plural = count !== 1;
+      return {
+        ok: false,
+        message: `${count} load${plural ? "s are" : " is"} recorded against this driver. Reassign or clear the driver on ${plural ? "them" : "it"} first — deleting would erase who ran ${plural ? "them" : "it"}.`,
+      };
+    }
+
+    const { error: deleteError } = await supabase
+      .from("drivers")
+      .delete()
+      .eq("id", driverId);
+    if (deleteError) return { ok: false, message: deleteError.message };
+
+    revalidatePath("/fleet");
+    revalidatePath("/active-loads");
+    return { ok: true, message: null };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+}
+
 /* --- loads ------------------------------------------------------------------- */
 
 export interface CreateLoadInput {

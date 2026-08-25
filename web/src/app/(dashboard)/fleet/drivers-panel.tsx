@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 
 import {
   Badge,
@@ -22,6 +22,7 @@ import {
   driverHours,
   formatDuration,
 } from "@/lib/driver-hours";
+import { deleteDriver } from "@/lib/data/mutations";
 import { formatDateFull, relativeTime } from "@/lib/format";
 import type { Driver, Truck } from "@/lib/types";
 
@@ -48,6 +49,7 @@ function DriverCard({
   assignment,
   now,
   onEdit,
+  onDelete,
 }: {
   driver: Driver;
   /** The driver's assigned vehicle, if the truck still exists. */
@@ -55,6 +57,7 @@ function DriverCard({
   assignment: DriverAssignment;
   now: Date;
   onEdit: () => void;
+  onDelete: () => void;
 }) {
   const hours = driverHours(driver);
   const cpc = cpcState(driver, now);
@@ -109,6 +112,14 @@ function DriverCard({
             className="rounded-sm p-1.5 text-ink-subtle transition-colors hover:bg-surface-muted hover:text-ink"
           >
             <Icon name="tune" className="text-[17px]" />
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            aria-label={`Delete ${driver.full_name}`}
+            className="rounded-sm p-1.5 text-ink-subtle transition-colors hover:bg-danger-soft hover:text-danger"
+          >
+            <Icon name="delete" className="text-[17px]" />
           </button>
         </div>
       </div>
@@ -248,6 +259,7 @@ export function DriversPanel({
 
   const router = useRouter();
   const [editing, setEditing] = useState<Driver | null | undefined>(undefined);
+  const [deleting, setDeleting] = useState<Driver | null>(null);
 
   const driving = drivers.filter((d) => d.duty_status === "driving").length;
   const lastSync = drivers
@@ -330,6 +342,7 @@ export function DriversPanel({
                 assignment={assignments[driver.id] ?? null}
                 now={now}
                 onEdit={() => setEditing(driver)}
+                onDelete={() => setDeleting(driver)}
               />
             </li>
           ))}
@@ -349,6 +362,18 @@ export function DriversPanel({
         />
       ) : null}
 
+      {deleting ? (
+        <DriverDeleteConfirm
+          driver={deleting}
+          assignment={assignments[deleting.id] ?? null}
+          onClose={() => setDeleting(null)}
+          onDeleted={() => {
+            setDeleting(null);
+            router.refresh();
+          }}
+        />
+      ) : null}
+
       <p className="mt-4 flex items-start gap-2 text-caption text-ink-subtle">
         <Icon name="gavel" className="mt-px text-[15px]" />
         Driving time and rest under Regulation (EC) No 561/2006 — 4h30 driving
@@ -356,6 +381,93 @@ export function DriversPanel({
         in UK and NI law with the same figures. These counters are a planning
         aid; the tachograph record is the legal evidence.
       </p>
+    </>
+  );
+}
+
+function DriverDeleteConfirm({
+  driver,
+  assignment,
+  onClose,
+  onDeleted,
+}: {
+  driver: Driver;
+  /** Current (not-yet-completed) load, if any — known from props, no extra fetch. */
+  assignment: DriverAssignment;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-50 bg-ink/25 backdrop-blur-[1px]"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Delete ${driver.full_name}`}
+        className="fixed inset-x-4 top-[18vh] z-50 mx-auto max-w-md overflow-hidden rounded-lg border border-hairline bg-surface shadow-pop"
+      >
+        <div className="flex items-start gap-3 px-6 py-5">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-danger-soft text-danger">
+            <Icon name="delete" className="text-[20px]" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-title text-ink">Delete {driver.full_name}?</h2>
+            <p className="mt-1 text-body-sm text-ink-muted">
+              {assignment
+                ? `Currently on ${assignment.reference}${assignment.plate ? ` · ${assignment.plate}` : ""}. Reassign or remove them from that load first — a driver on a load cannot be deleted.`
+                : "This cannot be undone. A driver with any load recorded against them — past or present — cannot be deleted; that record is who the CMR names and who the duty counters belong to."}
+            </p>
+          </div>
+        </div>
+
+        {error ? (
+          <p
+            role="alert"
+            className="mx-6 mb-4 flex items-start gap-2 rounded-sm border border-danger-border bg-danger-soft px-3 py-2 text-body-sm text-danger"
+          >
+            <Icon name="error" className="mt-px text-[17px]" />
+            {error}
+          </p>
+        ) : null}
+
+        <footer className="flex items-center gap-2 border-t border-hairline px-6 py-3">
+          <Button onClick={onClose} className="mr-auto">
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            icon={pending ? "progress_activity" : "delete"}
+            disabled={pending}
+            onClick={() =>
+              startTransition(async () => {
+                const result = await deleteDriver(driver.id);
+                if (result.ok) {
+                  onDeleted();
+                } else {
+                  setError(result.message ?? "Could not delete.");
+                }
+              })
+            }
+          >
+            {pending ? "Deleting…" : "Delete driver"}
+          </Button>
+        </footer>
+      </div>
     </>
   );
 }
