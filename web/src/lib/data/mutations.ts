@@ -92,6 +92,54 @@ export async function updateTruck(
   }
 }
 
+/**
+ * Removes a truck.
+ *
+ * `loads.truck_id` is `ON DELETE SET NULL`, so the database would let this
+ * through — but the truck named on a load is what the CMR and the driver's
+ * duty counters actually ran in. Nulling that out, even on a completed load,
+ * would erase what the job was done in. So a truck with any load recorded
+ * against it, past or present, is not deletable; reassign or clear the load
+ * first. (`drivers.assigned_truck_id` is a different story — it is only a
+ * planning default and is fine to lose, which is exactly what its
+ * `ON DELETE SET NULL` does.)
+ *
+ * The common trigger for this is a plate/Vehicle Number change in Reveal:
+ * sync matches on `gps_device_id` and never deletes, so a renamed vehicle
+ * shows up as a new truck and leaves the old row behind, unreferenced.
+ */
+export async function deleteTruck(truckId: string): Promise<WriteResult> {
+  try {
+    await requireSession();
+    const supabase = await createClient();
+
+    const { count, error } = await supabase
+      .from("loads")
+      .select("id", { count: "exact", head: true })
+      .eq("truck_id", truckId);
+    if (error) return { ok: false, message: error.message };
+    if ((count ?? 0) > 0) {
+      const plural = count !== 1;
+      return {
+        ok: false,
+        message: `${count} load${plural ? "s are" : " is"} recorded against this truck. Reassign or clear the truck on ${plural ? "them" : "it"} first — deleting would erase what ${plural ? "they were" : "it was"} run in.`,
+      };
+    }
+
+    const { error: deleteError } = await supabase
+      .from("trucks")
+      .delete()
+      .eq("id", truckId);
+    if (deleteError) return { ok: false, message: deleteError.message };
+
+    revalidatePath("/fleet");
+    revalidatePath("/live-fleet-map");
+    return { ok: true, message: null };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+}
+
 /* --- orders ------------------------------------------------------------------ */
 
 export async function importOrders(orders: Order[]): Promise<WriteResult> {

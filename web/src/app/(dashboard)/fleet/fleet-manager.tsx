@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 
 import {
   Button,
@@ -13,7 +13,10 @@ import {
   TruckSignalBadge,
   cx,
 } from "@/components/ui";
-import { updateTruck as persistTruck } from "@/lib/data/mutations";
+import {
+  deleteTruck,
+  updateTruck as persistTruck,
+} from "@/lib/data/mutations";
 import { truckDuty, truckSignal, unavailabilityReason } from "@/lib/fleet-status";
 import { formatDateFull } from "@/lib/format";
 import { vehicleBreaches } from "@/lib/regions";
@@ -95,12 +98,14 @@ function TruckCard({
   assignment,
   onEdit,
   onToggle,
+  onDelete,
   now,
 }: {
   truck: Truck;
   assignment: Assignment;
   onEdit: () => void;
   onToggle: (next: boolean) => void;
+  onDelete: () => void;
   now: Date;
 }) {
   const duty = truckDuty(truck, assignment !== null);
@@ -230,9 +235,19 @@ function TruckCard({
 
         <div className="mt-auto flex items-center justify-between gap-2 border-t border-hairline pt-3">
           <AvailabilitySwitch truck={truck} onToggle={onToggle} />
-          <Button icon="tune" onClick={onEdit}>
-            Edit
-          </Button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={onDelete}
+              aria-label={`Delete ${truck.license_plate}`}
+              className="rounded-sm p-1.5 text-ink-subtle transition-colors hover:bg-danger-soft hover:text-danger"
+            >
+              <Icon name="delete" className="text-[17px]" />
+            </button>
+            <Button icon="tune" onClick={onEdit}>
+              Edit
+            </Button>
+          </div>
         </div>
       </div>
     </Card>
@@ -250,6 +265,7 @@ export function FleetManager({
 }) {
   const [fleet, setFleet] = useState<Truck[]>(trucks);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [duty, setDuty] = useState<"all" | TruckDuty>("all");
   const [featureFilter, setFeatureFilter] = useState<string[]>([]);
   const [query, setQuery] = useState("");
@@ -318,6 +334,7 @@ export function FleetManager({
   }, [fleet, duty, featureFilter, query, assignments]);
 
   const editing = fleet.find((t) => t.id === editingId) ?? null;
+  const deleting = fleet.find((t) => t.id === deletingId) ?? null;
 
   return (
     <>
@@ -447,6 +464,7 @@ export function FleetManager({
                 assignment={assignments[truck.id] ?? null}
                 now={now}
                 onEdit={() => setEditingId(truck.id)}
+                onDelete={() => setDeletingId(truck.id)}
                 onToggle={(next) =>
                   updateTruck(truck.id, {
                     availability: next ? "available" : "unavailable",
@@ -483,6 +501,107 @@ export function FleetManager({
           }}
         />
       ) : null}
+
+      {deleting ? (
+        <TruckDeleteConfirm
+          truck={deleting}
+          assignment={assignments[deleting.id] ?? null}
+          onClose={() => setDeletingId(null)}
+          onDeleted={() => {
+            setFleet((prev) => prev.filter((t) => t.id !== deleting.id));
+            setDeletingId(null);
+          }}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function TruckDeleteConfirm({
+  truck,
+  assignment,
+  onClose,
+  onDeleted,
+}: {
+  truck: Truck;
+  /** Current (not-yet-completed) load, if any — known from props, no extra fetch. */
+  assignment: Assignment;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-50 bg-ink/25 backdrop-blur-[1px]"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Delete ${truck.license_plate}`}
+        className="fixed inset-x-4 top-[18vh] z-50 mx-auto max-w-md overflow-hidden rounded-lg border border-hairline bg-surface shadow-pop"
+      >
+        <div className="flex items-start gap-3 px-6 py-5">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-danger-soft text-danger">
+            <Icon name="delete" className="text-[20px]" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-title text-ink">
+              Delete {truck.license_plate}?
+            </h2>
+            <p className="mt-1 text-body-sm text-ink-muted">
+              {assignment
+                ? `Currently on ${assignment.reference}${assignment.driver ? ` · ${assignment.driver}` : ""}. Reassign or remove it from that load first — a truck on a load cannot be deleted.`
+                : "This cannot be undone. A truck with any load recorded against it — past or present — cannot be deleted; that record is what the CMR names and what the job was actually run in."}
+            </p>
+          </div>
+        </div>
+
+        {error ? (
+          <p
+            role="alert"
+            className="mx-6 mb-4 flex items-start gap-2 rounded-sm border border-danger-border bg-danger-soft px-3 py-2 text-body-sm text-danger"
+          >
+            <Icon name="error" className="mt-px text-[17px]" />
+            {error}
+          </p>
+        ) : null}
+
+        <footer className="flex items-center gap-2 border-t border-hairline px-6 py-3">
+          <Button onClick={onClose} className="mr-auto">
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            icon={pending ? "progress_activity" : "delete"}
+            disabled={pending}
+            onClick={() =>
+              startTransition(async () => {
+                const result = await deleteTruck(truck.id);
+                if (result.ok) {
+                  onDeleted();
+                } else {
+                  setError(result.message ?? "Could not delete.");
+                }
+              })
+            }
+          >
+            {pending ? "Deleting…" : "Delete truck"}
+          </Button>
+        </footer>
+      </div>
     </>
   );
 }
