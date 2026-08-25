@@ -139,6 +139,23 @@ export function GoogleCanvas({
       scale,
     });
 
+    // A teardrop pin, not a dot — the delivery stop is a fixed place a truck
+    // is heading *to*, and it needs to read differently from the round
+    // vehicle markers at a glance, not just in a different colour. Anchored
+    // at its own tip (12, 22) so the point, not the icon's centre, sits on
+    // the coordinate.
+    const PIN_PATH =
+      "M12 22s8-4.5 8-11.8A8 8 0 1 0 4 10.2C4 17.5 12 22 12 22z";
+    const pin = (fill: string, scale: number) => ({
+      path: PIN_PATH,
+      fillColor: fill,
+      fillOpacity: 1,
+      strokeColor: surface,
+      strokeWeight: 1.5,
+      scale,
+      anchor: new maps.Point(12, 22),
+    });
+
     // Depot.
     drawn.current.markers.push(
       new maps.Marker({
@@ -238,7 +255,7 @@ export function GoogleCanvas({
             position: target,
             title: `${stop?.order.customer_name ?? "Stop"} — ${stop?.order.delivery_address ?? ""}`,
             zIndex: 20,
-            icon: dot(ink, 5),
+            icon: pin(active ? ink : inkSubtle, active ? 1.3 : 1.1),
           }),
         );
       }
