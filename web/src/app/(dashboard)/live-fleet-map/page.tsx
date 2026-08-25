@@ -5,6 +5,7 @@ import {
   GEOFENCE_RADIUS_M,
   activeOf,
   getLoads,
+  getOrders,
   getTrucks,
   stopsInGeofence,
 } from "@/lib/data/fleet";
@@ -17,23 +18,34 @@ import { RealtimeStatus } from "./realtime-status";
 export const metadata: Metadata = { title: "Live Fleet Map" };
 
 export default async function LiveFleetMapPage() {
-  const [trucks, loads] = await Promise.all([getTrucks(), getLoads()]);
+  const [trucks, loads, orders] = await Promise.all([
+    getTrucks(),
+    getLoads(),
+    getOrders(),
+  ]);
   const reporting = trucks.filter((t) => t.current_location !== null);
   const offline = trucks.length - reporting.length;
   const activeLoads = activeOf(loads);
   const inGeofence = stopsInGeofence(loads);
   const mapsKey = googleMapsKey();
 
+  // Demand that has not yet been put on a load — the CRM's "where we need to
+  // go next", not the truck's own next stop. Only the geocoded ones can be
+  // pinned; the rest are counted so the gap is visible rather than silent.
+  const pending = orders.filter((o) => o.status === "pending");
+  const pendingOrders = pending.filter((o) => o.delivery_location !== null);
+  const pendingUngeocoded = pending.length - pendingOrders.length;
+
   return (
     <Page>
       <PageHeader
         eyebrow="Dispatch"
         title="Live Fleet Map"
-        description="Truck positions from the telematics feed, with the 5 km alert geofence drawn around each next stop."
+        description="Truck positions from the telematics feed, with the 5 km alert geofence drawn around each next stop, alongside pending orders not yet on a load."
         actions={<SyncGpsButton />}
       />
 
-      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-5">
         <StatTile
           label="Reporting"
           value={reporting.length}
@@ -64,16 +76,39 @@ export default async function LiveFleetMapPage() {
           icon="signal_disconnected"
           tone={offline > 0 ? "danger" : "ok"}
         />
+        <StatTile
+          label="Unplanned demand"
+          value={pendingOrders.length}
+          hint="Pending orders pinned, not yet on a load"
+          icon="pin_drop"
+          tone={pendingOrders.length > 0 ? "brand" : "neutral"}
+        />
       </div>
 
       <FleetMap
         trucks={trucks}
         loads={loads}
+        pendingOrders={pendingOrders}
         now={new Date()}
         googleMapsKey={mapsKey}
       />
 
       <RealtimeStatus />
+
+      {pendingUngeocoded > 0 ? (
+        <div className="mt-4 flex items-start gap-3 rounded-lg border border-hairline bg-surface px-4 py-3 shadow-card">
+          <Icon name="pin_drop" className="mt-0.5 text-[18px] text-ink-subtle" />
+          <p className="text-body-sm text-ink-muted">
+            <strong className="text-ink">
+              {pendingUngeocoded} pending order{pendingUngeocoded === 1 ? "" : "s"}
+            </strong>{" "}
+            {pendingUngeocoded === 1 ? "has" : "have"} no coordinates yet, so{" "}
+            {pendingUngeocoded === 1 ? "it isn't" : "they aren't"} pinned above.
+            Geocode {pendingUngeocoded === 1 ? "it" : "them"} from the Orders
+            Queue to see {pendingUngeocoded === 1 ? "it" : "them"} on the map.
+          </p>
+        </div>
+      ) : null}
 
       {!mapsKey ? (
         <div className="mt-4 flex items-start gap-3 rounded-lg border border-hairline bg-surface px-4 py-3 shadow-card">

@@ -36,7 +36,7 @@ import {
   relativeTime,
 } from "@/lib/format";
 import { DEFAULT_VIEW, DEPOT, REFERENCE_PLACES } from "@/lib/geo/reference";
-import type { LatLng, LoadView, Truck } from "@/lib/types";
+import type { LatLng, LoadView, Order, Truck } from "@/lib/types";
 
 import { GoogleCanvas } from "./google-canvas";
 
@@ -52,11 +52,14 @@ type XY = { x: number; y: number };
 export function FleetMap({
   trucks,
   loads,
+  pendingOrders,
   now,
   googleMapsKey,
 }: {
   trucks: Truck[];
   loads: LoadView[];
+  /** CRM demand not yet on a load. Only the geocoded ones — see the page's caveat. */
+  pendingOrders: Order[];
   now: Date;
   /** Absent → the schematic below, which is to scale but has no roads. */
   googleMapsKey: string | null;
@@ -80,6 +83,9 @@ export function FleetMap({
         const stop = nextStop(l);
         return stop?.order.delivery_location ? [stop.order.delivery_location] : [];
       }),
+      ...pendingOrders.flatMap((o) =>
+        o.delivery_location ? [o.delivery_location] : [],
+      ),
     ];
 
     // An empty fleet still needs a sane frame rather than NaN bounds.
@@ -158,7 +164,7 @@ export function FleetMap({
         (p) => Math.hypot(p.x - depotXY.x, p.y - depotXY.y) > 8,
       ),
     };
-  }, [located, loads]);
+  }, [located, loads, pendingOrders]);
 
   const selected = trucks.find((t) => t.id === selectedId) ?? null;
   const selectedLoad = selected ? loadForTruck(loads, selected.id) : undefined;
@@ -200,7 +206,7 @@ export function FleetMap({
         />
 
         <div className="relative bg-surface-muted">
-          {located.length === 0 ? (
+          {located.length === 0 && pendingOrders.length === 0 ? (
             <EmptyState
               icon="satellite_alt"
               title="No positions yet"
@@ -211,6 +217,7 @@ export function FleetMap({
               apiKey={googleMapsKey}
               trucks={trucks}
               loads={loads}
+              pendingOrders={pendingOrders}
               selectedId={selectedId}
               onSelect={setSelectedId}
             />
@@ -288,6 +295,30 @@ export function FleetMap({
                 >
                   Depot
                 </text>
+              </g>
+
+              <g>
+                {pendingOrders.map((order) => {
+                  if (!order.delivery_location) return null;
+                  const at = view.project(order.delivery_location);
+                  return (
+                    <circle
+                      key={order.id}
+                      cx={at.x}
+                      cy={at.y}
+                      r={view.marker * 0.4}
+                      fill="none"
+                      stroke="var(--color-ink-subtle)"
+                      strokeWidth={1.5}
+                      strokeDasharray="2 2"
+                      vectorEffect="non-scaling-stroke"
+                    >
+                      <title>
+                        {`${order.customer_name} — ${order.delivery_address} (pending, not yet on a load)`}
+                      </title>
+                    </circle>
+                  );
+                })}
               </g>
 
               {trucks.map((truck) => {
@@ -399,15 +430,30 @@ export function FleetMap({
             </svg>
           )}
 
-          {located.length > 0 ? (
+          {located.length > 0 || pendingOrders.length > 0 ? (
             <ul className="pointer-events-none absolute bottom-3 right-3 z-10 space-y-1 rounded-sm border border-hairline bg-surface/90 px-3 py-2 backdrop-blur-sm">
               {[
-                { color: "var(--color-brand)", label: "Truck / route leg" },
-                { color: "var(--color-warn)", label: "Inside 5 km geofence" },
-                { color: "var(--color-ink)", label: "Stop / depot" },
+                { color: "var(--color-brand)", label: "Truck / route leg", hollow: false },
+                { color: "var(--color-warn)", label: "Inside 5 km geofence", hollow: false },
+                { color: "var(--color-ink)", label: "Stop / depot", hollow: false },
+                {
+                  color: "var(--color-ink-subtle)",
+                  label: "Pending order, not yet on a load",
+                  hollow: true,
+                },
               ].map((l) => (
                 <li key={l.label} className="flex items-center gap-2 text-caption text-ink-muted">
-                  <span className="size-2 rounded-full" style={{ background: l.color }} />
+                  <span
+                    className="size-2 shrink-0 rounded-full"
+                    style={
+                      l.hollow
+                        ? {
+                            border: `1.5px dashed ${l.color}`,
+                            background: "transparent",
+                          }
+                        : { background: l.color }
+                    }
+                  />
                   {l.label}
                 </li>
               ))}

@@ -19,7 +19,7 @@ import { Icon } from "@/components/ui";
 import { GEOFENCE_RADIUS_M, loadForTruck, nextStop } from "@/lib/fleet-selectors";
 import { DEPOT } from "@/lib/geo/reference";
 import { MAP_DEFAULT_ZOOM, loadGoogleMaps, token } from "@/lib/maps";
-import type { LoadView, Truck } from "@/lib/types";
+import type { LoadView, Order, Truck } from "@/lib/types";
 
 /** Every overlay we own, so a redraw can dispose of exactly its own objects. */
 interface Drawn {
@@ -31,12 +31,15 @@ export function GoogleCanvas({
   apiKey,
   trucks,
   loads,
+  pendingOrders,
   selectedId,
   onSelect,
 }: {
   apiKey: string;
   trucks: Truck[];
   loads: LoadView[];
+  /** CRM demand not yet on a load. Only the geocoded ones. */
+  pendingOrders: Order[];
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
@@ -102,6 +105,7 @@ export function GoogleCanvas({
     const brand = token("--color-brand", "#2f4bd6");
     const warn = token("--color-warn", "#b26a00");
     const ink = token("--color-ink", "#1c2126");
+    const inkSubtle = token("--color-ink-subtle", "#7b8798");
     const surface = token("--color-surface", "#ffffff");
 
     // Clear what the previous pass drew. Google overlays are not React —
@@ -125,6 +129,16 @@ export function GoogleCanvas({
       labelOrigin: new maps.Point(0, -2.6),
     });
 
+    // Hollow — deliberately not a filled dot, so a pending order never reads
+    // as a truck or an active stop at a glance.
+    const ring = (stroke: string, scale: number) => ({
+      path: maps.SymbolPath.CIRCLE,
+      fillOpacity: 0,
+      strokeColor: stroke,
+      strokeWeight: 2,
+      scale,
+    });
+
     // Depot.
     drawn.current.markers.push(
       new maps.Marker({
@@ -143,6 +157,24 @@ export function GoogleCanvas({
     );
     bounds.extend({ lat: DEPOT.lat, lng: DEPOT.lng });
     anyPoint = true;
+
+    // Pending orders — CRM demand not yet on a load. Drawn before trucks so a
+    // truck marker sitting on top of one always wins visually.
+    for (const order of pendingOrders) {
+      if (!order.delivery_location) continue;
+      bounds.extend(order.delivery_location);
+      anyPoint = true;
+
+      drawn.current.markers.push(
+        new maps.Marker({
+          map,
+          position: order.delivery_location,
+          title: `${order.customer_name} — ${order.delivery_address} (pending, not yet on a load)`,
+          zIndex: 15,
+          icon: ring(inkSubtle, 6),
+        }),
+      );
+    }
 
     for (const truck of trucks) {
       if (!truck.current_location) continue;
@@ -232,12 +264,15 @@ export function GoogleCanvas({
     // Fit once. Re-fitting on every fix would yank the view out from under a
     // dispatcher who has zoomed in on one truck.
     if (!fitted && anyPoint) {
-      if (trucks.some((t) => t.current_location)) {
+      if (
+        trucks.some((t) => t.current_location) ||
+        pendingOrders.some((o) => o.delivery_location)
+      ) {
         map.fitBounds(bounds, 48);
       }
       setFitted(true);
     }
-  }, [status, trucks, loads, selectedId, fitted]);
+  }, [status, trucks, loads, pendingOrders, selectedId, fitted]);
 
   // --- follow the selection ------------------------------------------------
   useEffect(() => {
