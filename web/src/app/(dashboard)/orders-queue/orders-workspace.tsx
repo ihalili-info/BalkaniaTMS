@@ -106,7 +106,32 @@ export function OrdersWorkspace({
     setDialogOpen(false);
     setWriteError(null);
     void importOrders(incoming).then((r) => {
-      if (!r.ok) setWriteError(r.message ?? "Could not save the imported orders.");
+      if (!r.ok) {
+        setWriteError(r.message ?? "Could not save the imported orders.");
+        return;
+      }
+
+      // The rows above are still keyed by the client-invented `imp-…`
+      // placeholder; swap in the real UUID the insert assigned, or the next
+      // action on one of them (Fix address, delete, auto-plan) sends that
+      // placeholder to Postgres as an id and fails.
+      setOrders((prev) =>
+        prev.map((o) => {
+          const real = r.ids[o.crm_order_id];
+          return real && real !== o.id ? { ...o, id: real } : o;
+        }),
+      );
+      setImportedIds((prev) => {
+        const next = new Set(prev);
+        for (const o of incoming) {
+          const real = r.ids[o.crm_order_id];
+          if (real) {
+            next.delete(o.id);
+            next.add(real);
+          }
+        }
+        return next;
+      });
     });
   };
 

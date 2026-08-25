@@ -142,7 +142,19 @@ export async function deleteTruck(truckId: string): Promise<WriteResult> {
 
 /* --- orders ------------------------------------------------------------------ */
 
-export async function importOrders(orders: Order[]): Promise<WriteResult> {
+export interface ImportOrdersResult extends WriteResult {
+  /**
+   * `crm_order_id` → the real database id the insert assigned. The caller
+   * imported these rows under the client-invented `imp-…` placeholder from
+   * `orders-import.ts` (not a UUID); it must swap that for the real id here,
+   * or the next action on the row — Fix address, delete, auto-plan — sends a
+   * non-UUID id to Postgres and fails with "invalid input syntax for type
+   * uuid".
+   */
+  ids: Record<string, string>;
+}
+
+export async function importOrders(orders: Order[]): Promise<ImportOrdersResult> {
   try {
     await requireSession();
     const supabase = await createClient();
@@ -166,7 +178,7 @@ export async function importOrders(orders: Order[]): Promise<WriteResult> {
       .insert(rows)
       .select("id, crm_order_id");
 
-    if (error) return { ok: false, message: error.message };
+    if (error) return { ok: false, message: error.message, ids: {} };
 
     // Coordinates go through the RPC, because PostgREST cannot write a
     // GEOGRAPHY column directly.
@@ -182,9 +194,13 @@ export async function importOrders(orders: Order[]): Promise<WriteResult> {
     }
 
     revalidatePath("/orders-queue");
-    return { ok: true, message: `Imported ${rows.length} orders.` };
+    return {
+      ok: true,
+      message: `Imported ${rows.length} orders.`,
+      ids: Object.fromEntries(byRef),
+    };
   } catch (e) {
-    return { ok: false, message: (e as Error).message };
+    return { ok: false, message: (e as Error).message, ids: {} };
   }
 }
 
