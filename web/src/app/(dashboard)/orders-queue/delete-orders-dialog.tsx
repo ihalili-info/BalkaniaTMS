@@ -27,7 +27,7 @@ export function DeleteOrdersDialog({
   orders: Order[];
   loadRefByOrderId: Record<string, string>;
   onClose: () => void;
-  onDeleted: () => void;
+  onDeleted: (deletedIds: string[]) => void;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -131,7 +131,7 @@ export function DeleteOrdersDialog({
                 setError(null);
                 const result = await deleteOrders(orders.map((o) => o.id));
                 if (result.ok) {
-                  onDeleted();
+                  onDeleted(result.deletedIds);
                   router.refresh();
                 } else {
                   setError(result.message ?? "Could not delete.");

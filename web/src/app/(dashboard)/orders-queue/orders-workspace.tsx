@@ -94,6 +94,17 @@ export function OrdersWorkspace({
     setFixing(remaining.length > 0 ? { startWith: remaining[0].id } : null);
   };
 
+  /**
+   * `orders` is this component's own copy, seeded once from the server page.
+   * `router.refresh()` after a delete re-fetches that page, but a client
+   * component's existing state does not pick up new props on its own — the
+   * deleted rows would otherwise sit on screen until the page fully remounts
+   * (a hard refresh or navigating away and back).
+   */
+  const handleOrdersDeleted = (deletedIds: string[]) => {
+    setOrders((prev) => prev.filter((o) => !deletedIds.includes(o.id)));
+  };
+
   const handleImport = (incoming: Order[]) => {
     // Newest first, matching the queue's own ordering.
     setOrders((prev) => [...incoming, ...prev]);
@@ -271,6 +282,7 @@ export function OrdersWorkspace({
         importedIds={importedIds}
         geocodingReady={geocodingReady}
         onFixAddress={(id) => setFixing({ startWith: id })}
+        onOrdersDeleted={handleOrdersDeleted}
       />
 
       {fixing ? (

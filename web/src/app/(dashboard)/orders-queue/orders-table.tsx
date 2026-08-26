@@ -42,6 +42,7 @@ export function OrdersTable({
   importedIds,
   geocodingReady,
   onFixAddress,
+  onOrdersDeleted,
 }: {
   orders: Order[];
   trucks: Truck[];
@@ -51,6 +52,8 @@ export function OrdersTable({
   /** Ids added by CSV import this session — marked so they are traceable. */
   importedIds?: Set<string>;
   onFixAddress?: (orderId: string) => void;
+  /** Lets the parent drop the deleted rows from its own copy of `orders`. */
+  onOrdersDeleted?: (deletedIds: string[]) => void;
 }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
@@ -184,9 +187,10 @@ export function OrdersTable({
           orders={orders.filter((o) => selected.includes(o.id))}
           loadRefByOrderId={loadRefByOrderId}
           onClose={() => setDeleting(false)}
-          onDeleted={() => {
+          onDeleted={(deletedIds) => {
             setDeleting(false);
             setSelected([]);
+            onOrdersDeleted?.(deletedIds);
           }}
         />
       ) : null}

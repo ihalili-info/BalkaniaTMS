@@ -708,6 +708,8 @@ export async function deleteLoad(loadId: string): Promise<WriteResult> {
 
 export interface DeleteOrdersResult extends WriteResult {
   deleted: number;
+  /** The real ids actually removed, so the caller can drop them from its own list. */
+  deletedIds: string[];
   /** Orders left alone, with the reason, so nothing disappears silently. */
   blocked: { id: string; reason: string }[];
 }
@@ -729,7 +731,11 @@ export interface DeleteOrdersResult extends WriteResult {
  * path already refuses to drop a delivered stop.
  */
 export async function deleteOrders(ids: string[]): Promise<DeleteOrdersResult> {
-  const empty = { deleted: 0, blocked: [] as { id: string; reason: string }[] };
+  const empty = {
+    deleted: 0,
+    deletedIds: [] as string[],
+    blocked: [] as { id: string; reason: string }[],
+  };
   try {
     await requireSession();
     if (ids.length === 0) {
@@ -772,12 +778,15 @@ export async function deleteOrders(ids: string[]): Promise<DeleteOrdersResult> {
         ok: false,
         message: "Nothing here can be deleted.",
         deleted: 0,
+        deletedIds: [],
         blocked,
       };
     }
 
     const { error } = await supabase.from("orders").delete().in("id", deletable);
-    if (error) return { ok: false, message: error.message, deleted: 0, blocked };
+    if (error) {
+      return { ok: false, message: error.message, deleted: 0, deletedIds: [], blocked };
+    }
 
     revalidatePath("/orders-queue");
     revalidatePath("/active-loads");
@@ -789,6 +798,7 @@ export async function deleteOrders(ids: string[]): Promise<DeleteOrdersResult> {
           ? `${deletable.length} order${deletable.length === 1 ? "" : "s"} deleted.`
           : `${deletable.length} deleted, ${blocked.length} kept.`,
       deleted: deletable.length,
+      deletedIds: deletable,
       blocked,
     };
   } catch (e) {
