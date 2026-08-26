@@ -292,12 +292,27 @@ export function GoogleCanvas({
   }, [status, trucks, loads, pendingOrders, selectedId, fitted]);
 
   // --- follow the selection ------------------------------------------------
+  // Frames the truck *and* its next stop, not just the truck — picking a load
+  // from the "Active loads" list is a request to see where it's headed, and a
+  // plain panTo can leave that pin off the edge of the viewport.
   useEffect(() => {
     const map = mapRef.current;
     if (status !== "ready" || !map || !selectedId) return;
     const truck = trucks.find((t) => t.id === selectedId);
-    if (truck?.current_location) map.panTo(truck.current_location);
-  }, [status, selectedId, trucks]);
+    if (!truck?.current_location) return;
+
+    const load = loadForTruck(loads, truck.id);
+    const target = load ? nextStop(load)?.order.delivery_location : undefined;
+
+    if (target) {
+      const bounds = new window.google.maps.LatLngBounds();
+      bounds.extend(truck.current_location);
+      bounds.extend(target);
+      map.fitBounds(bounds, 64);
+    } else {
+      map.panTo(truck.current_location);
+    }
+  }, [status, selectedId, trucks, loads]);
 
   // --- teardown ------------------------------------------------------------
   useEffect(

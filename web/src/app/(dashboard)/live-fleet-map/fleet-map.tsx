@@ -25,6 +25,7 @@ import {
 } from "@/components/ui";
 import {
   GEOFENCE_RADIUS_M,
+  activeOf,
   loadForTruck,
   nextStop,
 } from "@/lib/fleet-selectors";
@@ -69,6 +70,7 @@ export function FleetMap({
   );
 
   const located = trucks.filter((t) => t.current_location !== null);
+  const activeLoads = activeOf(loads);
 
   /**
    * Everything is derived inside the component now — with real data the fleet
@@ -463,6 +465,67 @@ export function FleetMap({
       </Card>
 
       <div className="space-y-4">
+        <Card>
+          <CardHeader
+            title="Active loads"
+            hint={`${activeLoads.length} in progress`}
+          />
+          {activeLoads.length === 0 ? (
+            <EmptyState
+              icon="route"
+              title="No active loads"
+              description="Loads appear here once a driver departs on one."
+            />
+          ) : (
+            <ul className="divide-y divide-hairline">
+              {activeLoads.map((load) => {
+                const stop = nextStop(load);
+                const truckId = load.truck_id;
+                const selectable = truckId !== null;
+                return (
+                  <li key={load.id}>
+                    <button
+                      type="button"
+                      disabled={!selectable}
+                      onClick={() => truckId && setSelectedId(truckId)}
+                      aria-pressed={selectable && truckId === selectedId}
+                      className={cx(
+                        "flex w-full items-center gap-3 px-4 py-3 text-left transition-colors",
+                        selectable && truckId === selectedId
+                          ? "bg-brand-soft"
+                          : selectable
+                            ? "hover:bg-surface-muted"
+                            : "cursor-not-allowed opacity-60",
+                      )}
+                    >
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-brand-soft text-brand">
+                        <Icon name="location_on" filled className="text-[17px]" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-mono text-data-sm font-medium text-ink">
+                          {load.reference}
+                        </span>
+                        <span className="block truncate text-caption text-ink-subtle">
+                          {stop
+                            ? `${stop.order.customer_name} · ${load.driver?.full_name ?? "no driver"}`
+                            : "No stops remaining"}
+                        </span>
+                      </span>
+                      {stop?.distance_m != null ? (
+                        <span className="shrink-0 font-mono text-data-sm tabular text-ink-muted">
+                          {formatDistance(stop.distance_m)}
+                        </span>
+                      ) : (
+                        <LoadStatusBadge status={load.status} />
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Card>
+
         <Card>
           <CardHeader
             title="Units"
