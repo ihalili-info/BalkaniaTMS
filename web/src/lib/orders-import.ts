@@ -53,8 +53,8 @@ export const IMPORT_FIELDS: FieldSpec[] = [
   {
     id: "customer_phone",
     label: "Phone",
-    required: true,
-    hint: "Where the delivery alerts go. Include the country code.",
+    required: false,
+    hint: "Where the delivery alerts go, include the country code. Without one, this customer gets none of the three alerts.",
     aliases: ["customer_phone", "phone", "telephone", "tel", "mobile", "contact", "contact number", "phone number"],
   },
   {
@@ -67,7 +67,7 @@ export const IMPORT_FIELDS: FieldSpec[] = [
   {
     id: "delivery_postcode",
     label: "Postcode",
-    required: false,
+    required: true,
     hint: "Eircode, UK postcode, CP, PLZ — validated per country.",
     aliases: ["delivery_postcode", "postcode", "post code", "eircode", "zip", "zipcode", "postal code", "plz", "cp"],
   },
@@ -241,9 +241,16 @@ export function validateRows(
       }
     }
 
-    // --- phone ---
+    // --- phone: optional, but silently importing one with no way to reach the
+    //     customer would hide that this order can never get an alert ---
     const phone = values.customer_phone;
-    if (phone !== "" && !phone.replace(/[\s()-]/g, "").startsWith("+")) {
+    if (phone === "") {
+      issues.push({
+        field: "customer_phone",
+        message: "No phone — this customer will not receive any of the three alerts",
+        severity: "warning",
+      });
+    } else if (!phone.replace(/[\s()-]/g, "").startsWith("+")) {
       issues.push({
         field: "customer_phone",
         message: `No country code — alerts may fail. Expected ${country(countryCode).dialPrefix}…`,
