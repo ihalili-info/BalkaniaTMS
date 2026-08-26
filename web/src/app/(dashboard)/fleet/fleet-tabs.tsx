@@ -7,6 +7,7 @@ import type { Driver, Truck } from "@/lib/types";
 
 import { DriversPanel, type DriverAssignment } from "./drivers-panel";
 import { FleetManager, type Assignment } from "./fleet-manager";
+import { RevealSync } from "./reveal-sync";
 
 type Tab = "trucks" | "drivers";
 
@@ -32,35 +33,44 @@ export function FleetTabs({
 
   return (
     <>
-      <div
-        role="tablist"
-        aria-label="Fleet resources"
-        className="mb-6 flex gap-1 border-b border-hairline"
-      >
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            role="tab"
-            aria-selected={tab === t.key}
-            onClick={() => setTab(t.key)}
-            className={cx(
-              "-mb-px flex items-center gap-2 border-b-2 px-3 py-2.5 text-body-sm transition-colors",
-              tab === t.key
-                ? "border-brand font-medium text-ink"
-                : "border-transparent text-ink-muted hover:text-ink",
-            )}
-          >
-            <Icon
-              name={t.icon}
-              filled={tab === t.key}
-              className={cx("text-[18px]", tab === t.key && "text-brand")}
-            />
-            {t.label}
-            <span className="font-mono text-label tabular text-ink-subtle">
-              {t.count}
-            </span>
-          </button>
-        ))}
+      <div className="mb-6 flex items-end justify-between gap-3 border-b border-hairline">
+        <div role="tablist" aria-label="Fleet resources" className="flex gap-1">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              role="tab"
+              aria-selected={tab === t.key}
+              onClick={() => setTab(t.key)}
+              className={cx(
+                "-mb-px flex items-center gap-2 border-b-2 px-3 py-2.5 text-body-sm transition-colors",
+                tab === t.key
+                  ? "border-brand font-medium text-ink"
+                  : "border-transparent text-ink-muted hover:text-ink",
+              )}
+            >
+              <Icon
+                name={t.icon}
+                filled={tab === t.key}
+                className={cx("text-[18px]", tab === t.key && "text-brand")}
+              />
+              {t.label}
+              <span className="font-mono text-label tabular text-ink-subtle">
+                {t.count}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* Reveal only has a vehicle list — there is no driver roster to pull,
+            so this button only ever makes sense on the Trucks tab. Showing it
+            globally (it used to sit in the page header) let a dispatcher click
+            it from Drivers and get a vehicle-only dialog that did nothing for
+            what they were looking at. */}
+        {tab === "trucks" ? (
+          <div className="pb-2">
+            <RevealSync />
+          </div>
+        ) : null}
       </div>
 
       {tab === "trucks" ? (

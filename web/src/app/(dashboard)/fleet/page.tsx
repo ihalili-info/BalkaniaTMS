@@ -10,7 +10,6 @@ import {
 } from "@/lib/data/fleet";
 
 import { FleetTabs } from "./fleet-tabs";
-import { RevealSync } from "./reveal-sync";
 import type { Assignment } from "./fleet-manager";
 import type { DriverAssignment } from "./drivers-panel";
 
@@ -55,14 +54,7 @@ export default async function FleetPage() {
         eyebrow="Dispatch"
         title="Fleet"
         description="The GPS feed brings in truck positions; the tachograph feed brings in driver duty. Everything else — capacity, equipment, availability and licences — is recorded here."
-        actions={
-          <>
-            <Button icon="download">Export fleet</Button>
-            {/* The fleet comes from Reveal — typing plates in by hand would
-                risk a Vehicle Number the GPS webhook cannot match. */}
-            <RevealSync />
-          </>
-        }
+        actions={<Button icon="download">Export fleet</Button>}
       />
 
       <FleetTabs
