@@ -106,6 +106,7 @@ export function GoogleCanvas({
     const warn = token("--color-warn", "#b26a00");
     const ink = token("--color-ink", "#1c2126");
     const inkSubtle = token("--color-ink-subtle", "#7b8798");
+    const danger = token("--color-danger", "#c33227");
     const surface = token("--color-surface", "#ffffff");
 
     // Clear what the previous pass drew. Google overlays are not React —
@@ -188,7 +189,7 @@ export function GoogleCanvas({
           position: order.delivery_location,
           title: `${order.customer_name} — ${order.delivery_address} (pending, not yet on a load)`,
           zIndex: 15,
-          icon: ring(inkSubtle, 6),
+          icon: ring(danger, 6),
         }),
       );
     }

@@ -310,7 +310,7 @@ export function FleetMap({
                       cy={at.y}
                       r={view.marker * 0.4}
                       fill="none"
-                      stroke="var(--color-ink-subtle)"
+                      stroke="var(--color-danger)"
                       strokeWidth={1.5}
                       strokeDasharray="2 2"
                       vectorEffect="non-scaling-stroke"
@@ -439,7 +439,7 @@ export function FleetMap({
                 { color: "var(--color-warn)", label: "Inside 5 km geofence", hollow: false },
                 { color: "var(--color-ink)", label: "Stop / depot", hollow: false },
                 {
-                  color: "var(--color-ink-subtle)",
+                  color: "var(--color-danger)",
                   label: "Pending order, not yet on a load",
                   hollow: true,
                 },
