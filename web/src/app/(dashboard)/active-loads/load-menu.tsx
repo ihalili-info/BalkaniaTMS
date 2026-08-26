@@ -11,7 +11,7 @@ import {
   controlClass,
   cx,
 } from "@/components/ui";
-import { deleteLoad, updateLoad } from "@/lib/data/mutations";
+import { deleteLoad, unstartLoad, updateLoad } from "@/lib/data/mutations";
 import type { Driver, LoadView, Order, Truck } from "@/lib/types";
 
 /**
@@ -31,13 +31,20 @@ export function LoadMenu({
   drivers: Driver[];
   unassignedOrders: Order[];
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [unstartError, setUnstartError] = useState<string | null>(null);
+  const [unstarting, startUnstarting] = useTransition();
 
   const deliveredCount = load.stops.filter((s) => s.delivered_at !== null).length;
   const alertsSent = load.stops.some((s) => s.notifications.length > 0);
   const deletable = deliveredCount === 0 && !alertsSent;
+  // Same threshold as delete — nothing on it has actually happened yet, so
+  // "started by mistake" (or started onto a truck/driver already running
+  // another active load) can still be undone rather than only deleted.
+  const unstartable = load.status === "active" && deletable;
 
   return (
     <>
@@ -76,6 +83,44 @@ export function LoadMenu({
                 <Icon name="edit" className="text-[17px]" />
                 Edit load
               </button>
+
+              {load.status === "active" ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!unstartable || unstarting}
+                  title={
+                    unstartable
+                      ? undefined
+                      : "Delivered stops or sent alerts mean this load has actually left the yard"
+                  }
+                  onClick={() => {
+                    setUnstartError(null);
+                    startUnstarting(async () => {
+                      const result = await unstartLoad(load.id);
+                      if (result.ok) {
+                        setOpen(false);
+                        router.refresh();
+                      } else {
+                        setUnstartError(result.message ?? "Could not move it back to planned.");
+                      }
+                    });
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-body-sm text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink disabled:cursor-not-allowed disabled:text-ink-subtle disabled:hover:bg-transparent"
+                >
+                  <Icon
+                    name={unstarting ? "progress_activity" : "undo"}
+                    className="text-[17px]"
+                  />
+                  {unstarting ? "Moving back…" : "Move back to planned"}
+                </button>
+              ) : null}
+
+              {unstartError ? (
+                <p className="border-t border-hairline bg-danger-soft px-3 py-2 text-caption text-danger">
+                  {unstartError}
+                </p>
+              ) : null}
 
               <button
                 type="button"

@@ -489,11 +489,64 @@ export async function createLoad(
   }
 }
 
-/** Moves a planned load onto the road. */
+/**
+ * Moves a planned load onto the road.
+ *
+ * A truck or driver can only physically be running one load at a time.
+ * Several *planned* loads queued up behind each other on the same truck is
+ * normal — a dispatcher plans a whole day ahead — but two loads both
+ * `active` on the same truck or driver is a state nothing downstream expects:
+ * `loadForTruck`/`loadForDriver` (the live map, the Units list, the duty
+ * counters) each just `.find()` the active load for a truck or driver and
+ * silently drop the other one rather than erroring, so the second load would
+ * quietly vanish from most of the app while still claiming to be running.
+ */
 export async function startLoad(loadId: string): Promise<WriteResult> {
   try {
     await requireSession();
     const supabase = await createClient();
+
+    const { data: load, error: loadError } = await supabase
+      .from("loads")
+      .select("id, truck_id, driver_id")
+      .eq("id", loadId)
+      .maybeSingle();
+    if (loadError) return { ok: false, message: loadError.message };
+    if (!load) return { ok: false, message: "That load no longer exists." };
+
+    if (load.truck_id) {
+      const { data, error } = await supabase
+        .from("loads")
+        .select("id")
+        .eq("truck_id", load.truck_id)
+        .eq("status", "active")
+        .neq("id", loadId)
+        .limit(1);
+      if (error) return { ok: false, message: error.message };
+      if (data && data.length > 0) {
+        return {
+          ok: false,
+          message: `This truck is already running LOAD-${data[0].id.slice(0, 8).toUpperCase()}. Complete or remove that one first — it can't be on two active loads at once.`,
+        };
+      }
+    }
+
+    if (load.driver_id) {
+      const { data, error } = await supabase
+        .from("loads")
+        .select("id")
+        .eq("driver_id", load.driver_id)
+        .eq("status", "active")
+        .neq("id", loadId)
+        .limit(1);
+      if (error) return { ok: false, message: error.message };
+      if (data && data.length > 0) {
+        return {
+          ok: false,
+          message: `This driver is already running LOAD-${data[0].id.slice(0, 8).toUpperCase()}. Complete or remove that one first — they can't be on two active loads at once.`,
+        };
+      }
+    }
 
     const { error } = await supabase
       .from("loads")
@@ -513,6 +566,72 @@ export async function startLoad(loadId: string): Promise<WriteResult> {
       await supabase
         .from("orders")
         .update({ status: "en_route", updated_at: new Date().toISOString() })
+        .in("id", items.map((i) => i.order_id));
+    }
+
+    revalidatePath("/active-loads");
+    revalidatePath("/orders-queue");
+    return { ok: true, message: null };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+}
+
+/**
+ * Reverses `startLoad` — moves an active load back to planned.
+ *
+ * The escape hatch for starting the wrong load, or starting a second one on a
+ * truck or driver that was already running the first (what `startLoad`'s
+ * clash check above now prevents going forward, but does not undo on its
+ * own). Only allowed while nothing on the load has actually happened: no
+ * delivered stop, no alert sent. Past that point the load has genuinely left
+ * the yard, and "un-starting" it would misrepresent history — the same
+ * threshold `deleteLoad` already uses for the same reason.
+ */
+export async function unstartLoad(loadId: string): Promise<WriteResult> {
+  try {
+    await requireSession();
+    const supabase = await createClient();
+
+    const { data: items, error: itemsError } = await supabase
+      .from("load_items")
+      .select("id, order_id, delivered_at")
+      .eq("load_id", loadId);
+    if (itemsError) return { ok: false, message: itemsError.message };
+
+    const delivered = (items ?? []).filter((i) => i.delivered_at !== null);
+    if (delivered.length > 0) {
+      return {
+        ok: false,
+        message: `${delivered.length} stop${delivered.length === 1 ? " has" : "s have"} already been delivered — this load has actually left the yard and can't be un-started.`,
+      };
+    }
+
+    if (items && items.length > 0) {
+      const { count, error: notifError } = await supabase
+        .from("notifications")
+        .select("id", { count: "exact", head: true })
+        .in("load_item_id", items.map((i) => i.id));
+      if (notifError) return { ok: false, message: notifError.message };
+      if ((count ?? 0) > 0) {
+        return {
+          ok: false,
+          message: "A customer alert has already been sent for this load and can't be un-started.",
+        };
+      }
+    }
+
+    const { error } = await supabase
+      .from("loads")
+      .update({ status: "planned" })
+      .eq("id", loadId)
+      .eq("status", "active");
+    if (error) return { ok: false, message: error.message };
+
+    if (items && items.length > 0) {
+      await supabase
+        .from("orders")
+        .update({ status: "assigned", updated_at: new Date().toISOString() })
         .in("id", items.map((i) => i.order_id));
     }
 
