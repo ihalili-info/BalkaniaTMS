@@ -124,6 +124,39 @@ export const CONNECTORS: Connector[] = [
     ],
   },
   {
+    id: "geotab",
+    name: "Geotab",
+    purpose:
+      "A second telematics option for truck positions, in case the fleet ever needs a provider besides Reveal. No truck is wired to it — today every truck comes from Reveal, and `trucks` has no column for which provider a given truck belongs to.",
+    icon: "radar",
+    status: "not_built",
+    envVars: [
+      "GEOTAB_SERVER",
+      "GEOTAB_DATABASE",
+      "GEOTAB_USERNAME",
+      "GEOTAB_PASSWORD",
+    ],
+    secrets: ["GEOTAB_PASSWORD"],
+    endpoint: "POST https://<server>/apiv1 (JSON-RPC, method: Authenticate)",
+    note: "MyGeotab has no API-key concept — it authenticates as a MyGeotab user (database + username + password), returning a session id. Geotab's own service-account guidance is to create a dedicated, non-personal login scoped to the lowest security clearance the integration needs (View Only is usually enough for reading positions), rather than reusing a dispatcher's own account. No route or client exists yet.",
+    fields: [
+      {
+        key: "server",
+        label: "MyGeotab server",
+        kind: "text",
+        placeholder: "my.geotab.com",
+        help: "Authenticate first against my.geotab.com; the response's `path` names the actual server that database lives on, which belongs here afterwards — Geotab databases are not all on the same host.",
+      },
+      {
+        key: "database",
+        label: "Database name",
+        kind: "text",
+        placeholder: "e.g. balkania_tms",
+        help: "The MyGeotab company database — an internal identifier, not a display name. Not a secret.",
+      },
+    ],
+  },
+  {
     id: "sent",
     name: "Sent (sent.dm)",
     purpose:
@@ -262,6 +295,7 @@ export const DEFAULT_CONFIG: Record<string, Record<string, string | number | boo
     poll_interval_minutes: 5,
     push_enabled: true,
   },
+  geotab: { server: "", database: "" },
   sent: { profile_id: "", default_channel: "auto", retention_days: 90 },
   crm: { enabled: false },
   geocoding: { provider: "none" },
