@@ -46,9 +46,9 @@ export function RouteActions({ load }: { load: LoadView }) {
           load={load}
           onClose={() => setOpen(false)}
           onSend={({ channel, to }) => {
-            // The single seam for Sent. Today it records locally; wiring it
-            // up means POSTing to a route handler that sends via Sent and
-            // inserts a `driver_messages` row (migration 0005).
+            // The dialog itself already called sendDriverRouteMessage and
+            // confirmed success before invoking this — this just updates the
+            // badge.
             setSent({ channel, to });
             setOpen(false);
           }}

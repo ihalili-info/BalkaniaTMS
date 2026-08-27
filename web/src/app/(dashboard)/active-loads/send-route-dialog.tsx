@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 
 import { Badge, Button, Icon, cx } from "@/components/ui";
+import { sendDriverRouteMessage } from "@/lib/data/messaging";
 import {
   routeMessage,
   smsSegments,
@@ -26,13 +27,15 @@ export function SendRouteDialog({
   onClose,
 }: {
   load: LoadView;
-  onSend: (summary: { channel: Channel; body: string; to: string }) => void;
+  onSend: (summary: { channel: Channel; to: string }) => void;
   onClose: () => void;
 }) {
   const [selected, setSelected] = useState<NavApp[]>(["google", "waze"]);
   const [channel, setChannel] = useState<Channel>("sms");
   const [forceGsm, setForceGsm] = useState(false);
   const [copied, setCopied] = useState<NavApp | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -74,8 +77,14 @@ export function SendRouteDialog({
   const phone = load.driver?.phone ?? null;
   const warning = truckRoutingWarning(load.truck, load.destination_countries);
 
+  // Sent's driver-route template takes one link, not one per app — so of
+  // whichever apps the dispatcher ticked, the first one's URL is what
+  // actually goes out. The message preview below still shows all of them;
+  // only this one reaches the driver's phone.
+  const routeUrl = selected.map((app) => urls[app]).find((u) => u !== null) ?? null;
+
   const canSend =
-    phone !== null && selected.length > 0 && geocodedCount > 0;
+    phone !== null && selected.length > 0 && geocodedCount > 0 && routeUrl !== null;
 
   const copy = async (app: NavApp) => {
     const url = urls[app];
@@ -253,6 +262,13 @@ export function SendRouteDialog({
             <pre className="whitespace-pre-wrap break-words rounded-sm border border-hairline bg-surface-muted px-3 py-2.5 font-mono text-data-sm text-ink-muted">
               {body || "Select at least one navigation app."}
             </pre>
+            <p className="mt-1.5 text-caption text-ink-subtle">
+              A preview for your own reference — the send uses the registered
+              Sent template, with{" "}
+              <span className="font-mono text-data-sm">{routeUrl ?? "—"}</span>{" "}
+              as its link. The template&rsquo;s own wording may not match this
+              exactly.
+            </p>
 
             {meta.unicode && channel === "sms" ? (
               <label className="mt-2 flex items-start gap-2 rounded-sm border border-warn-border bg-warn-soft px-3 py-2 text-caption text-ink-muted">
@@ -274,6 +290,16 @@ export function SendRouteDialog({
           </section>
         </div>
 
+        {sendError ? (
+          <p
+            role="alert"
+            className="mx-6 mb-3 flex items-start gap-2 rounded-sm border border-danger-border bg-danger-soft px-3 py-2 text-body-sm text-danger"
+          >
+            <Icon name="error" className="mt-px text-[17px]" />
+            {sendError}
+          </p>
+        ) : null}
+
         <footer className="flex flex-wrap items-center gap-2 border-t border-hairline px-6 py-3">
           <p className="mr-auto max-w-sm text-caption text-ink-subtle">
             Goes to the driver only. Customers receive nothing from here — just
@@ -282,13 +308,32 @@ export function SendRouteDialog({
           <Button onClick={onClose}>Cancel</Button>
           <Button
             variant="primary"
-            icon="send"
-            disabled={!canSend}
-            onClick={() =>
-              onSend({ channel, body, to: phone ?? "" })
-            }
+            icon={pending ? "progress_activity" : "send"}
+            disabled={!canSend || pending}
+            onClick={() => {
+              setSendError(null);
+              startTransition(async () => {
+                const result = await sendDriverRouteMessage({
+                  loadId: load.id,
+                  driverId: load.driver?.id ?? null,
+                  toPhone: phone ?? "",
+                  channel,
+                  routeUrl: routeUrl ?? "",
+                  previewBody: body,
+                });
+                if (result.ok) {
+                  onSend({ channel: result.channel ?? channel, to: phone ?? "" });
+                } else {
+                  setSendError(result.message ?? "Could not send the route.");
+                }
+              });
+            }}
           >
-            {phone ? `Send ${channel.toUpperCase()}` : "No driver number"}
+            {pending
+              ? "Sending…"
+              : phone
+                ? `Send ${channel.toUpperCase()}`
+                : "No driver number"}
           </Button>
         </footer>
       </div>

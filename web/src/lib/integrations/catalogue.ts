@@ -195,6 +195,34 @@ export const CONNECTORS: Connector[] = [
         suffix: "days",
         help: "GDPR Art. 5(1)(e). Notification and driver-message rows are purged past this window.",
       },
+      {
+        key: "template_route_link",
+        label: "Driver route template",
+        kind: "text",
+        help: "Sent template id. Takes one variable, `routeURL` — the single navigation link sent to the driver.",
+        placeholder: "c7f9c11f-baad-45f0-b30f-16a3c6005528",
+      },
+      {
+        key: "template_dispatch_confirmation",
+        label: "Dispatch confirmation template",
+        kind: "text",
+        help: "Sent when a load's stop moves to en route — \"loaded and on its way\".",
+        placeholder: "fb169e73-5313-43d8-aef5-6dc41ed7bf37",
+      },
+      {
+        key: "template_proximity",
+        label: "Proximity alert template",
+        kind: "text",
+        help: "Sent when the truck enters the 5 km geofence around a stop.",
+        placeholder: "41767c8f-db37-4155-b39b-0dab9f467bd9",
+      },
+      {
+        key: "template_delivery_complete",
+        label: "Delivery complete template",
+        kind: "text",
+        help: "Sent once a stop's delivered_at is set.",
+        placeholder: "8c42ada4-eceb-45bb-8a80-0d2672aaa2e1",
+      },
     ],
   },
   {
@@ -296,7 +324,18 @@ export const DEFAULT_CONFIG: Record<string, Record<string, string | number | boo
     push_enabled: true,
   },
   geotab: { server: "", database: "" },
-  sent: { profile_id: "", default_channel: "auto", retention_days: 90 },
+  sent: {
+    profile_id: "",
+    default_channel: "auto",
+    retention_days: 90,
+    // Seeded with the templates already created in the Sent dashboard, so the
+    // integration works before anyone opens this card — override here if a
+    // template gets recreated with a new id.
+    template_route_link: "c7f9c11f-baad-45f0-b30f-16a3c6005528",
+    template_dispatch_confirmation: "fb169e73-5313-43d8-aef5-6dc41ed7bf37",
+    template_proximity: "41767c8f-db37-4155-b39b-0dab9f467bd9",
+    template_delivery_complete: "8c42ada4-eceb-45bb-8a80-0d2672aaa2e1",
+  },
   crm: { enabled: false },
   geocoding: { provider: "none" },
   tachograph: { provider: "" },
