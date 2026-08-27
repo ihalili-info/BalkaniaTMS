@@ -18,6 +18,7 @@ import { deriveStatus, loadConnectorStates } from "@/lib/integrations/store";
 
 import { ConnectorCard } from "./connector-card";
 import { GpsFeedCard } from "./gps-feed-card";
+import { TestConnectionsButton } from "./test-connections-button";
 
 import { AlertRules } from "./alert-rules";
 
@@ -43,9 +44,7 @@ export default async function IntegrationSettingsPage() {
         actions={
           <>
             <Button icon="description">Open .env.example</Button>
-            <Button variant="primary" icon="bolt">
-              Test connections
-            </Button>
+            <TestConnectionsButton />
           </>
         }
       />

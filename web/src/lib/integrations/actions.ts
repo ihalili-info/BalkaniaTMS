@@ -5,6 +5,10 @@ import { revalidatePath } from "next/cache";
 import { requireAccess } from "@/lib/auth/guard";
 import { getCurrentUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import {
+  readConfig as readSentConfig,
+  verifyConnection as verifySentConnection,
+} from "@/lib/messaging/sent";
 
 import { connector } from "./catalogue";
 import type { ConfigValue } from "./store";
@@ -78,4 +82,48 @@ export async function saveConnectorConfig(
 
   revalidatePath("/integration-settings");
   return { ok: true, message: `${spec.name} settings saved.` };
+}
+
+export interface ConnectionTestResult {
+  id: string;
+  name: string;
+  ok: boolean;
+  message: string;
+}
+
+/**
+ * The "Test connections" button's actual work.
+ *
+ * Only ever tests what has a **free** check — sending a real message to prove
+ * a channel works is not a test, it is a bill. Today that is Sent's
+ * `GET /v3/me`; Reveal, Geotab, geocoding and the rest have no equivalent
+ * wired up yet, so they are silently left out rather than reported as
+ * failing for a check that was never attempted.
+ */
+export async function testConnections(): Promise<ConnectionTestResult[]> {
+  await requireAccess("/integration-settings");
+
+  const results: ConnectionTestResult[] = [];
+
+  const sentConfig = readSentConfig();
+  if (!sentConfig) {
+    results.push({
+      id: "sent",
+      name: "Sent (sent.dm)",
+      ok: false,
+      message: "SENT_DM_API_KEY is not set.",
+    });
+  } else {
+    const check = await verifySentConnection(sentConfig);
+    results.push({
+      id: "sent",
+      name: "Sent (sent.dm)",
+      ok: check.ok,
+      message: check.ok
+        ? "Key is valid."
+        : (check.error ?? `Request failed (${check.status}).`),
+    });
+  }
+
+  return results;
 }
