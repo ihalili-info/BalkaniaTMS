@@ -515,6 +515,12 @@ well-formed Eircode it queries the **Eircode alone** before the address string
 address into a rooftop match. Falls through to the address-string query if the
 Eircode misses. `GeocodeOutcome.matchedBy` records which won.
 
+Postcodes are stored in **canonical form** — `normalisePostcode()` in
+`regions.ts` collapses `"n39hx56"`, `"N39 HX56"` and `"N39  HX56"` to one
+spelling on import and on Fix address, so the queue does not show three
+versions of one place and the cache keys them together. The IE pattern allows
+the `D6W` routing key (Dublin 6 West — a letter in the third position).
+
 ## Geocode cache
 
 `lib/geocoding/cache.ts` + migration 0012. Resolved delivery locations are
