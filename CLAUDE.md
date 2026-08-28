@@ -309,6 +309,11 @@ diverging.
 - `lib/orders-import.ts` owns the column schema, header aliases for
   auto-mapping, and validation. Postcode and country rules come from
   `regions.ts`, so a GB or DE import is checked against *that* country's format.
+- The address comes in as **two columns** — `address_line_1` (required) and
+  `address_line_2` (optional) — because that is how the CRM holds it. They are
+  joined with `", "` into the single `orders.delivery_address` on import; a
+  blank line 2 is dropped. A one-column file still works: `delivery address` /
+  `address` are aliases of line 1.
 - **Errors block a row; warnings do not.** A duplicate reference or unknown
   country is an error. A malformed postcode or a phone without a country code is
   a warning — postal data is messy, and dropping the order is worse than

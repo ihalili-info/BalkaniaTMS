@@ -394,7 +394,9 @@ export function ImportDialog({
                           </Td>
                           <Td className="max-w-[16rem]">
                             <span className="block truncate text-ink-muted">
-                              {row.values.delivery_address || "—"}
+                              {[row.values.address_line_1, row.values.address_line_2]
+                                .filter(Boolean)
+                                .join(", ") || "—"}
                             </span>
                             <span className="font-mono text-data-sm text-ink-subtle">
                               {[

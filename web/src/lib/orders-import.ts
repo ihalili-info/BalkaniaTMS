@@ -25,7 +25,8 @@ export type FieldId =
   | "crm_order_id"
   | "customer_name"
   | "customer_phone"
-  | "delivery_address"
+  | "address_line_1"
+  | "address_line_2"
   | "delivery_postcode"
   | "delivery_country"
   | "latitude"
@@ -64,11 +65,18 @@ export const IMPORT_FIELDS: FieldSpec[] = [
     aliases: ["customer_phone", "phone", "telephone", "tel", "mobile", "contact", "contact number", "phone number"],
   },
   {
-    id: "delivery_address",
-    label: "Delivery address",
+    id: "address_line_1",
+    label: "Address line 1",
     required: true,
-    hint: "Street and town. Commas are fine inside quotes.",
-    aliases: ["delivery_address", "address", "delivery address", "street", "address line 1", "address1", "ship to", "destination"],
+    hint: "Street or unit. A single-column address maps here too.",
+    aliases: ["address_line_1", "address 1", "address line 1", "address1", "addr1", "line 1", "street", "delivery_address", "delivery address", "address", "ship to", "destination"],
+  },
+  {
+    id: "address_line_2",
+    label: "Address line 2",
+    required: false,
+    hint: "Estate, area or town — joined to line 1 for the delivery address.",
+    aliases: ["address_line_2", "address 2", "address line 2", "address2", "addr2", "line 2", "unit", "apartment", "apt", "building"],
   },
   {
     id: "delivery_postcode",
@@ -305,6 +313,13 @@ export function validateRows(
       });
     }
 
+    // The schema stores one address string; the CRM (and this importer) split
+    // it across two lines. Join them back with a comma, dropping a blank line 2.
+    const deliveryAddress = [values.address_line_1, values.address_line_2]
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join(", ");
+
     const blocked = issues.some((issue) => issue.severity === "error");
 
     return {
@@ -318,7 +333,7 @@ export function validateRows(
             crm_order_id: ref,
             customer_name: values.customer_name,
             customer_phone: phone,
-            delivery_address: values.delivery_address,
+            delivery_address: deliveryAddress,
             // No geocoding provider is configured, so an imported address
             // without coordinates is queued for geocoding rather than dropped —
             // the same rule the CRM ingestion path has to follow.
@@ -365,7 +380,8 @@ export function templateRows(): string[][] {
       "CRM-24301",
       "Kelly's Wholesale",
       "+353 87 123 4567",
-      "Unit 12, Ballymount Industrial Estate, Dublin 12",
+      "Unit 12, Ballymount Industrial Estate",
+      "Walkinstown, Dublin 12",
       "D12 AB34",
       "IE",
       "",
@@ -376,7 +392,8 @@ export function templateRows(): string[][] {
       "CRM-24302",
       "Lagan Retail Group",
       "+44 28 9032 7741",
-      "Duncrue Industrial Estate, Belfast",
+      "Duncrue Industrial Estate",
+      "Belfast",
       "BT3 9BP",
       "XI",
       "54.6210",
