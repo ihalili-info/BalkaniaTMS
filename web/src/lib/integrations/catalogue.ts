@@ -267,6 +267,30 @@ export const CONNECTORS: Connector[] = [
     ],
   },
   {
+    id: "routing",
+    name: "Routing & ETA",
+    purpose:
+      "Road distance and drive time for auto-plan sequencing and live truck ETAs. Falls back to straight-line maths when absent.",
+    icon: "route",
+    status: "not_configured",
+    envVars: ["ROUTING_API_KEY"],
+    secrets: ["ROUTING_API_KEY"],
+    endpoint: "POST routes.googleapis.com (computeRoutes / computeRouteMatrix)",
+    note: "Car routing — Google Routes has no HGV profile, so it ignores height, weight and ADR limits. A routed number beats a straight line and is still not a truck-legal route. ROUTING_API_KEY may hold the same value as GEOCODING_API_KEY (one Google Cloud project); the code falls back to that key if this one is unset, but the card only reads green once ROUTING_API_KEY is set explicitly.",
+    fields: [
+      {
+        key: "provider",
+        label: "Provider",
+        kind: "select",
+        options: [
+          { value: "none", label: "None — straight-line distance only" },
+          { value: "google", label: "Google Routes API" },
+        ],
+        help: "With none set, auto-plan and ETAs use great-circle distance at a flat 45 km/h.",
+      },
+    ],
+  },
+  {
     id: "tachograph",
     name: "Tachograph",
     purpose:
@@ -338,6 +362,7 @@ export const DEFAULT_CONFIG: Record<string, Record<string, string | number | boo
   },
   crm: { enabled: false },
   geocoding: { provider: "none" },
+  routing: { provider: "none" },
   tachograph: { provider: "" },
   customs: { eori_number: "", ukims_authorisation: "" },
   supabase: {},

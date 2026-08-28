@@ -9,6 +9,11 @@ import {
   readConfig as readSentConfig,
   verifyConnection as verifySentConnection,
 } from "@/lib/messaging/sent";
+import {
+  ROUTING_MESSAGE,
+  routingConfigured,
+  verifyRoutingConnection,
+} from "@/lib/routing/google";
 
 import { connector } from "./catalogue";
 import type { ConfigValue } from "./store";
@@ -96,9 +101,10 @@ export interface ConnectionTestResult {
  *
  * Only ever tests what has a **free** check — sending a real message to prove
  * a channel works is not a test, it is a bill. Today that is Sent's
- * `GET /v3/me`; Reveal, Geotab, geocoding and the rest have no equivalent
- * wired up yet, so they are silently left out rather than reported as
- * failing for a check that was never attempted.
+ * `GET /v3/me` and a 1×1 Routes matrix request (a fraction of a cent — the
+ * Routes API has no free endpoint). Reveal, Geotab, geocoding and the rest
+ * have no equivalent wired up yet, so they are silently left out rather than
+ * reported as failing for a check that was never attempted.
  */
 export async function testConnections(): Promise<ConnectionTestResult[]> {
   await requireAccess("/integration-settings");
@@ -122,6 +128,25 @@ export async function testConnections(): Promise<ConnectionTestResult[]> {
       message: check.ok
         ? "Key is valid."
         : (check.error ?? `Request failed (${check.status}).`),
+    });
+  }
+
+  if (!routingConfigured()) {
+    results.push({
+      id: "routing",
+      name: "Routing & ETA",
+      ok: false,
+      message: ROUTING_MESSAGE.not_configured,
+    });
+  } else {
+    const check = await verifyRoutingConnection();
+    results.push({
+      id: "routing",
+      name: "Routing & ETA",
+      ok: check.ok,
+      message: check.ok
+        ? "Google Routes reachable and the key is enabled for it."
+        : (check.failure ? ROUTING_MESSAGE[check.failure] : "Request failed."),
     });
   }
 

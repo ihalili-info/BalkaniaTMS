@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import {
@@ -13,18 +13,25 @@ import {
   controlClass,
   cx,
 } from "@/components/ui";
-import { commitPlan, geocodeOrders, type GeocodeLine } from "@/lib/data/mutations";
-import { formatDistance } from "@/lib/format";
+import {
+  commitPlan,
+  geocodeOrders,
+  roadMatrixForOrders,
+  type GeocodeLine,
+} from "@/lib/data/mutations";
+import { coordKey, formatDistance } from "@/lib/format";
+import { formatDuration } from "@/lib/driver-hours";
 import { DEPOT } from "@/lib/geo/reference";
 import {
   DEFAULT_PLANNER_OPTIONS,
   SKIP_MESSAGE,
   planLoads,
+  type PlannerGeometry,
   type PlannerOptions,
   type ProposedLoad,
 } from "@/lib/load-planner";
 import { HOME_COUNTRY, requiresCmr } from "@/lib/regions";
-import type { Order, Truck } from "@/lib/types";
+import type { Order, RouteLeg, Truck } from "@/lib/types";
 
 /**
  * Auto-plan: geocode, then group by geography, then review.
@@ -68,6 +75,55 @@ export function AutoPlanDialog({
     (o) => o.delivery_location === null && !onLoad.has(o.id),
   );
 
+  // Road distances for the drops we can actually plan. Resolved once per set of
+  // located orders (a server round-trip that bills Google), then held and
+  // reused as the radius / max-stops knobs move — those must stay instant.
+  const locatedKey = useMemo(
+    () =>
+      orders
+        .filter((o) => o.delivery_location !== null && !onLoad.has(o.id))
+        .map((o) => o.id)
+        .sort()
+        .join(","),
+    [orders, onLoad],
+  );
+
+  // `forKey` records which set of drops the matrix was built for, so a matrix
+  // left over from a previous selection is ignored rather than reset in the
+  // effect body (which would be a synchronous cascading render).
+  const [road, setRoad] = useState<{
+    forKey: string;
+    legs: Record<string, RouteLeg> | null;
+    note: string | null;
+  } | null>(null);
+  const [routing, startRouting] = useTransition();
+  const requestedKey = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!locatedKey || locatedKey.split(",").length < 2) return;
+    if (requestedKey.current === locatedKey) return;
+    requestedKey.current = locatedKey;
+    startRouting(async () => {
+      const result = await roadMatrixForOrders(locatedKey.split(","));
+      setRoad({
+        forKey: locatedKey,
+        legs: result.routed ? result.legs : null,
+        note: result.message,
+      });
+    });
+  }, [locatedKey]);
+
+  const matrix = road?.forKey === locatedKey ? road.legs : null;
+  const routingNote = road?.forKey === locatedKey ? road.note : null;
+  const geometry = useMemo<PlannerGeometry>(
+    () =>
+      matrix
+        ? { leg: (a, b) => matrix[`${coordKey(a)}|${coordKey(b)}`] ?? null }
+        : {},
+    [matrix],
+  );
+  const routed = matrix !== null;
+
   const plan = useMemo(
     () =>
       planLoads({
@@ -77,8 +133,9 @@ export function AutoPlanDialog({
         originCountry: HOME_COUNTRY,
         onLoadOrderIds: onLoad,
         options,
+        geometry,
       }),
-    [orders, trucks, onLoad, options],
+    [orders, trucks, onLoad, options, geometry],
   );
 
   const kept = plan.loads
@@ -235,7 +292,7 @@ export function AutoPlanDialog({
                   id="ap-radius"
                   type="range"
                   min={5}
-                  max={120}
+                  max={300}
                   step={5}
                   value={options.maxRadiusKm}
                   onChange={(e) =>
@@ -292,12 +349,30 @@ export function AutoPlanDialog({
           </section>
 
           <p className="mb-4 flex items-start gap-2 rounded-sm border border-hairline bg-surface-muted px-3 py-2.5 text-caption text-ink-muted">
-            <Icon name="straighten" className="mt-px text-[16px] text-ink-subtle" />
+            <Icon
+              name={routed ? "route" : "straighten"}
+              className="mt-px text-[16px] text-ink-subtle"
+            />
             <span>
-              Distances are straight lines. There is no road network, no drive
-              time and no ferry in this calculation — two drops either side of
-              an estuary look adjacent here and are an hour apart in a truck.
-              Treat the sequence as a starting point and adjust it on the load.
+              {routing ? (
+                "Resolving road distances…"
+              ) : routed ? (
+                <>
+                  Distances and drive times are on real roads (Google Routes,
+                  live traffic excluded), ferries included. Still a{" "}
+                  <strong>car</strong> route — it does not know a 4.0 m bridge
+                  or a weight limit, so treat the sequence as a starting point
+                  and adjust it on the load.
+                </>
+              ) : (
+                <>
+                  Distances are straight lines
+                  {routingNote ? ` — ${routingNote}` : ""}. No road network, no
+                  drive time, no ferry — two drops either side of an estuary
+                  look adjacent here and are an hour apart in a truck. Treat the
+                  sequence as a starting point and adjust it on the load.
+                </>
+              )}
             </span>
           </p>
 
@@ -343,8 +418,11 @@ export function AutoPlanDialog({
                       <span className="font-mono text-label uppercase text-ink-subtle">
                         {load.stops.length} stop
                         {load.stops.length === 1 ? "" : "s"} ·{" "}
-                        {formatDistance(load.routeMeters)} round trip ·{" "}
-                        {formatDistance(load.spreadMeters)} spread
+                        {formatDistance(load.routeMeters)} round trip
+                        {load.routeSeconds !== null
+                          ? ` · ≈${formatDuration(load.routeSeconds)} driving`
+                          : ""}{" "}
+                        · {formatDistance(load.spreadMeters)} spread
                       </span>
                       {load.countries.map((c) => (
                         <CountryChip key={c} code={c} />

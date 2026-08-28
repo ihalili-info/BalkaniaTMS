@@ -5,12 +5,19 @@ import { revalidatePath } from "next/cache";
 import { getCurrentUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import type { CountryCode } from "@/lib/regions";
-import type { LatLng, Order, Truck } from "@/lib/types";
+import type { LatLng, Order, RouteLeg, Truck } from "@/lib/types";
 import {
   GEOCODE_MESSAGE,
   geocodeAddress,
   geocodingConfigured,
 } from "@/lib/geocoding/google";
+import {
+  ROUTING_MESSAGE,
+  routeMatrix,
+  routingConfigured,
+} from "@/lib/routing/google";
+import { coordKey } from "@/lib/format";
+import { DEPOT } from "@/lib/geo/reference";
 
 /**
  * Writes.
@@ -1016,7 +1023,7 @@ export async function geocodeOrders(ids: string[]): Promise<GeocodeBatchResult> 
         // The normalised address is shown back deliberately: a match that
         // silently landed on the wrong Station Road is only catchable by
         // reading what Google actually resolved to.
-        detail: `${result.formatted ?? "matched"}${result.partial ? " · partial match — check it" : ""}`,
+        detail: `${result.formatted ?? "matched"}${result.matchedBy === "eircode" ? " · via Eircode" : ""}${result.partial ? " · partial match — check it" : ""}`,
       });
     }
 
@@ -1034,6 +1041,89 @@ export async function geocodeOrders(ids: string[]): Promise<GeocodeBatchResult> 
     };
   } catch (e) {
     return { ok: false, message: (e as Error).message, ...empty };
+  }
+}
+
+/* --- road geometry for the planner ---------------------------------------- */
+
+export interface RoadMatrixResult {
+  /**
+   * Whether road distances are available. `false` is not an error — the dialog
+   * plans on straight lines and says so. `message` explains why when it helps.
+   */
+  routed: boolean;
+  message: string | null;
+  /**
+   * Road legs keyed `"{fromKey}|{toKey}"` (see `coordKey`), covering every
+   * ordered pair among the depot and the located drops. Missing pair = no
+   * route found; the planner falls back to a straight line for it.
+   */
+  legs: Record<string, RouteLeg>;
+}
+
+/**
+ * Resolves a road distance/time matrix over the depot and a set of orders, for
+ * the auto-planner to sequence against real roads instead of great-circle
+ * lines.
+ *
+ * Computed once per plan and handed to the client as a plain lookup — the
+ * planner itself never touches the network, so the radius and max-stops knobs
+ * stay instant. Traffic is not considered: a plan is built well before the
+ * truck rolls.
+ *
+ * Degrades quietly. No key, spent quota or a network blip returns
+ * `routed: false` and the planner carries on with straight lines.
+ */
+export async function roadMatrixForOrders(
+  orderIds: string[],
+): Promise<RoadMatrixResult> {
+  try {
+    await requireSession();
+    if (!routingConfigured()) {
+      return { routed: false, message: null, legs: {} };
+    }
+    if (orderIds.length === 0) {
+      return { routed: false, message: "Nothing selected.", legs: {} };
+    }
+
+    const supabase = await createClient();
+    const { data: rows, error } = await supabase
+      .from("orders_geo")
+      .select("id, lat, lng")
+      .in("id", orderIds.slice(0, GEOCODE_BATCH_LIMIT));
+    if (error) return { routed: false, message: error.message, legs: {} };
+
+    const depot: LatLng = { lat: DEPOT.lat, lng: DEPOT.lng };
+    const located: LatLng[] = [depot];
+    for (const r of rows ?? []) {
+      if (typeof r.lat === "number" && typeof r.lng === "number") {
+        located.push({ lat: r.lat, lng: r.lng });
+      }
+    }
+    // One drop plus the depot is the least that can form a run; below that
+    // there is nothing to sequence.
+    if (located.length < 3) {
+      return { routed: false, message: null, legs: {} };
+    }
+
+    const { matrix, failure } = await routeMatrix(located, located);
+    if (failure) {
+      return { routed: false, message: ROUTING_MESSAGE[failure], legs: {} };
+    }
+
+    const legs: Record<string, RouteLeg> = {};
+    for (let i = 0; i < located.length; i += 1) {
+      for (let j = 0; j < located.length; j += 1) {
+        const leg = matrix[i]?.[j];
+        if (i !== j && leg) {
+          legs[`${coordKey(located[i])}|${coordKey(located[j])}`] = leg;
+        }
+      }
+    }
+
+    return { routed: Object.keys(legs).length > 0, message: null, legs };
+  } catch (e) {
+    return { routed: false, message: (e as Error).message, legs: {} };
   }
 }
 

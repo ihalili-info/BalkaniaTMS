@@ -74,6 +74,11 @@ src/
 - **Compliance numbers are planning aids.** The Reg. 561/2006 counters and
   `estimateMinutes()` help a dispatcher decide; the tachograph is the legal
   record. Never label the app's figures as proof of compliance.
+- **Routing degrades, never breaks.** `lib/routing/google.ts` (Google Routes,
+  `ROUTING_API_KEY`) gives auto-plan road distances and live truck ETAs; every
+  path falls back to `haversineMeters` if the key is missing or a call fails,
+  and the UI marks which figure it is showing (`Stop.eta_source`). It is car
+  routing — `truckRoutingWarning()` still applies.
 
 ## Sending a driver their route
 

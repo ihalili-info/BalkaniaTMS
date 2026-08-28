@@ -1,4 +1,5 @@
 import { haversineMeters } from "@/lib/format";
+import { routeLeg, routingConfigured } from "@/lib/routing/google";
 import { createClient } from "@/lib/supabase/server";
 import { customsRegime, HOME_COUNTRY, type CountryCode } from "@/lib/regions";
 import type {
@@ -145,8 +146,15 @@ const REGIME_RANK: Record<string, number> = {
  *
  * One query with nested selects rather than a query per load — a dispatch
  * board with twenty loads would otherwise make sixty round trips.
+ *
+ * `routedEtas` adds a real road drive-time for each active load's next stop —
+ * one Google Routes call apiece. Off by default because `getLoads()` runs in
+ * the dashboard layout on every navigation; only Active Loads and the Live
+ * Fleet Map, which actually show an ETA, ask for it.
  */
-export async function getLoads(): Promise<LoadView[]> {
+export async function getLoads(
+  { routedEtas = false }: { routedEtas?: boolean } = {},
+): Promise<LoadView[]> {
   const supabase = await createClient();
 
   const [{ data: loadRows, error }, trucks, drivers, orders] = await Promise.all(
@@ -186,7 +194,7 @@ export async function getLoads(): Promise<LoadView[]> {
     }
   }
 
-  return (loadRows ?? []).map((row) => {
+  const views: LoadView[] = (loadRows ?? []).map((row) => {
     const truck = truckById.get(row.truck_id ?? "") ?? null;
     const driver = driverById.get(row.driver_id ?? "") ?? null;
 
@@ -197,7 +205,7 @@ export async function getLoads(): Promise<LoadView[]> {
         order_id: string;
         stop_sequence: number;
         delivered_at: string | null;
-      }) => {
+      }): Stop | null => {
         const order = orderById.get(item.order_id);
         if (!order) return null;
         const distance_m =
@@ -208,11 +216,14 @@ export async function getLoads(): Promise<LoadView[]> {
           ...item,
           order,
           distance_m,
+          // Filled in below for the next stop of an active load only.
+          drive_seconds: null,
+          eta_source: "straight_line",
           notifications: sentByStop.get(item.id) ?? [],
-        } satisfies Stop;
+        };
       })
-      .filter((s: Stop | null): s is Stop => s !== null)
-      .sort((a: Stop, b: Stop) => a.stop_sequence - b.stop_sequence);
+      .filter((s): s is Stop => s !== null)
+      .sort((a, b) => a.stop_sequence - b.stop_sequence);
 
     const destination_countries = [
       ...new Set(stops.map((s) => s.order.delivery_country)),
@@ -240,6 +251,51 @@ export async function getLoads(): Promise<LoadView[]> {
       stops,
     };
   });
+
+  if (routedEtas) await attachRoutedEtas(views);
+  return views;
+}
+
+/**
+ * Replaces the straight-line ETA with a real road drive-time for the one stop
+ * that matters: the next undelivered stop of each *active* load, from where its
+ * truck is right now.
+ *
+ * Deliberately narrow. Routing every stop of every load would be a Google call
+ * per stop on every board render; the only ETA a dispatcher acts on is the
+ * next one, and only while the truck is actually moving. Planned loads and
+ * downstream stops keep the `estimateMinutes()` figure, clearly labelled.
+ *
+ * Traffic-aware, because this is a live position. Fails soft — any error just
+ * leaves `eta_source: "straight_line"`.
+ *
+ * `distance_m` is left alone — it stays the straight-line figure the Live Fleet
+ * Map draws its 5 km ring from. Only `drive_seconds` is added.
+ */
+async function attachRoutedEtas(views: LoadView[]): Promise<void> {
+  if (!routingConfigured()) return;
+
+  const targets = views
+    .filter((v) => v.status === "active" && v.truck?.current_location)
+    .map((v) => ({
+      from: v.truck!.current_location!,
+      stop: v.stops.find(
+        (s) => s.delivered_at === null && s.order.delivery_location,
+      ),
+    }))
+    .filter((t): t is { from: LatLng; stop: Stop } => t.stop !== undefined);
+
+  await Promise.all(
+    targets.map(async ({ from, stop }) => {
+      const { leg } = await routeLeg(from, stop.order.delivery_location!, {
+        trafficAware: true,
+      });
+      if (leg) {
+        stop.drive_seconds = leg.durationSeconds;
+        stop.eta_source = "routed";
+      }
+    }),
+  );
 }
 
 /* --- pure selectors ---------------------------------------------------------
@@ -249,6 +305,7 @@ export async function getLoads(): Promise<LoadView[]> {
 
 export {
   GEOFENCE_RADIUS_M,
+  APPROACH_ETA_MINUTES,
   activeOf,
   plannedOf,
   loadRefByOrderId,
@@ -257,6 +314,8 @@ export {
   nextStop,
   loadProgress,
   stopsInGeofence,
+  stopEtaMinutes,
+  isApproaching,
 } from "../fleet-selectors";
 
 /* --- alert log --------------------------------------------------------------- */

@@ -69,6 +69,8 @@ keep it and `supabase/migrations/` in sync.
   - `src/lib/data/` — the real read layer (`fleet.ts`, `analytics.ts`) and `mutations.ts`
   - `src/lib/fleet-selectors.ts` — pure selectors, safe for client components
   - `src/lib/geo/reference.ts` — depot + map landmarks (reference data, not fixtures)
+  - `src/lib/routing/google.ts` — Google Routes API client (road distance/time,
+    live-traffic single leg); falls back to great-circle on any failure
   - `src/lib/integrations/` — connector catalogue, config store, messaging policy
   - `src/lib/types.ts` — row types mirroring the migration
   - `src/lib/supabase/` — `client.ts` (browser), `server.ts` (RSC/route handlers, cookie-based), `service.ts` (service-role, server-only, bypasses RLS — for webhooks/cron)
@@ -374,12 +376,15 @@ most of the mainland 4.00 m — so a legal Irish trailer can be illegal in Franc
 review → create. `lib/load-planner.ts` is the whole algorithm and it is pure —
 no I/O, no clock — so it can be reasoned about and run standalone.
 
-- **Straight lines only.** Every distance is great-circle. No roads, no drive
-  times, no ferries. Two drops either side of an estuary look adjacent and are
-  an hour apart in a truck. The output is a **proposal a dispatcher reviews**,
-  never something that dispatches itself, and the dialog says so where it would
-  be easiest to forget. Real optimisation waits on the routing/ETA provider
-  that is still unchosen.
+- **Roads when routing is configured, straight lines otherwise.** With
+  `ROUTING_API_KEY` set, sequencing, `routeMeters` and `routeSeconds` run on
+  the Google Routes matrix (ferries included); clustering stays great-circle
+  because a cluster centroid is not a real place to route from. Without a key,
+  every distance is great-circle — no roads, no drive times, no ferries, two
+  drops either side of an estuary look adjacent and are an hour apart. Either
+  way it is a **proposal a dispatcher reviews** (road routing is still a *car*,
+  not a 4.6 m trailer), and the dialog says so where it would be easiest to
+  forget.
 - **Customs splits before geography.** A cluster straddling a customs boundary
   cannot be cut in half afterwards without leaving both halves badly shaped, so
   regimes are separated first. Mixing a GB export with a domestic drop puts two
@@ -410,6 +415,13 @@ close. A wrong coordinate is worse than none, because none is visible. So
 country is checked twice — component filter plus bounding box — and Google's
 normalised address is shown back, because a match on the wrong Station Road is
 only catchable by reading it.
+
+**Eircode first, for Ireland.** An Eircode is a single building, not a district
+like a UK outward code. When an Irish order carries a well-formed one,
+`geocodeAddress()` queries the **Eircode alone** before it tries the address
+string — that is what turns a rural townland address with no usable street into
+a rooftop match. It falls through to the address query if the Eircode misses,
+and `GeocodeOutcome.matchedBy` records which produced the point.
 
 ## Deleting orders
 
@@ -457,11 +469,54 @@ comes from `loads`. The UI shows duty and GPS signal as two separate badges;
 don't collapse them, because a truck can be booked solid *and* have a dead
 tracker — `trk-06` in the fixtures is deliberately both.
 
+## Routing & ETA — Google Routes API
+
+`lib/routing/google.ts`, server-only, `ROUTING_API_KEY` (falls back to
+`GEOCODING_API_KEY` — same Google Cloud project). Two calls: `routeMatrix()`
+(traffic-unaware, 625-element tiles) feeds the auto-planner; `routeLeg()`
+(traffic-aware) is the live truck → next-stop ETA. **Both degrade to
+`haversineMeters` on any failure** — no key, spent quota or a network blip
+must never break auto-plan or the load board, it just drops to straight-line
+maths with the UI saying so.
+
+- **`travelMode: "DRIVE"` is a car.** Google Routes has no HGV profile, so it
+  ignores the 4.0 m bridge, the weight limit and ADR. `truckRoutingWarning()`
+  still applies at every navigation handoff. A routed number beats a straight
+  line and is not a truck-legal route.
+- **The planner stays pure.** `planLoads()` takes an optional
+  `geometry.leg(from, to)` accessor; `roadMatrixForOrders()` (a server action)
+  resolves the matrix once and the dialog hands it in as a plain lookup, so the
+  radius / max-stops knobs stay instant and never bill Google. Clustering stays
+  great-circle — a cluster centroid is not a real place to route from — only
+  sequencing, `routeMeters` and `routeSeconds` use roads.
+- **Live ETA is deliberately narrow.** `getLoads({ routedEtas: true })` — only
+  Active Loads and the Live Fleet Map pass it, because the dashboard layout
+  also calls `getLoads()` on every navigation — routes **only the next
+  undelivered stop of each *active* load**, traffic-aware. Every other stop
+  keeps `estimateMinutes()`, and `Stop.eta_source` (`"routed"` /
+  `"straight_line"`) says which; the UI labels it.
+- **The geofence signal.** `isApproaching()` in `lib/fleet-selectors.ts` prefers
+  a routed ETA (≤ `APPROACH_ETA_MINUTES`) and falls back to the 5 km
+  straight-line ring. The Live Fleet Map still **draws** the 5 km ring from
+  straight-line `distance_m` — a road distance is not a circle. This is a
+  dashboard cue, **not** an alert trigger: the geofence engine that fires
+  customer messages is still unbuilt, and wiring ETA to it is a separate task.
+
+## Order geocoding — Eircode first
+
+`geocodeAddress()` in `lib/geocoding/google.ts`. For an Irish order carrying a
+well-formed Eircode it queries the **Eircode alone** before the address string
+— an Eircode is a single building, not a district, so it turns a hopeless rural
+address into a rooftop match. Falls through to the address-string query if the
+Eircode misses. `GeocodeOutcome.matchedBy` records which won.
+
 ## Known gaps
 
-- **ETA-based geofence triggering** (vs. straight-line distance) needs a
-  routing/ETA API — not yet chosen. `estimateMinutes()` in `lib/format.ts` is a
-  crude 45 km/h stand-in for display only; it must never gate an alert.
+- **ETA-based geofence *alert firing*** still needs the geofence engine itself,
+  which is unbuilt. `isApproaching()` now has a routed-ETA signal, but nothing
+  fires `notifications` rows yet. `estimateMinutes()` in `lib/format.ts`
+  remains a crude 45 km/h stand-in for display only and must never gate an
+  alert.
 - GPS polling is capped by the **provider**, not by Vercel. Verizon asks for no
   more than one call per vehicle every 3–5 minutes, and there is no fleet-wide
   endpoint — so polling costs one HTTP call per truck per cycle. Vercel Cron's

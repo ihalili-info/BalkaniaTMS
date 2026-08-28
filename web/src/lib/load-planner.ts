@@ -6,14 +6,15 @@
  * crossing the country, which is the tedious part of planning a day and the
  * part a computer is genuinely better at.
  *
- * **What this is not: route optimisation.** Every distance here is a great-
- * circle line between two points. It knows nothing about roads, ferries,
- * one-way systems, the M50 at eight in the morning, or that Dublin to Holyhead
- * is a sailing and not a drive. Two drops 12 km apart across an estuary are
- * 40 minutes apart in reality and adjacent to this code. Real optimisation
- * needs a routing/ETA provider, which the project has deliberately not chosen
- * yet — so the output is a **proposal a dispatcher reviews**, never something
- * that should dispatch itself.
+ * **What this is not: route optimisation.** When no road geometry is supplied
+ * every distance here is a great-circle line — it knows nothing about roads,
+ * ferries, one-way systems, the M50 at eight in the morning, or that Dublin to
+ * Holyhead is a sailing and not a drive. Pass a `geometry.leg` accessor
+ * (Google Routes, via a server action) and sequencing, route length and the
+ * quoted drive time switch to the road network; clustering stays geographic
+ * because a cluster centroid is not a real place to route from. Either way the
+ * output is a **proposal a dispatcher reviews**, never something that should
+ * dispatch itself — road distances still assume a car, not a 4.6 m trailer.
  *
  * The honest framing matters because the failure mode is quiet: a plausible-
  * looking route that costs an extra two hours does not announce itself.
@@ -24,7 +25,19 @@
 
 import { haversineMeters } from "./format";
 import { customsRegime, type CountryCode, type CustomsRegime } from "./regions";
-import type { LatLng, Order, Truck } from "./types";
+import type { LatLng, Order, RouteLeg, Truck } from "./types";
+
+/**
+ * Road geometry, injected by the caller.
+ *
+ * `leg(from, to)` returns the road distance and drive time between two located
+ * points, or `null` to fall back to a straight line for that pair (unknown
+ * pair, no route, provider unconfigured). The planner never calls a network —
+ * the caller resolves a matrix once and hands in a pure lookup.
+ */
+export interface PlannerGeometry {
+  leg?: (from: LatLng, to: LatLng) => RouteLeg | null;
+}
 
 export interface PlannerOptions {
   /**
@@ -61,8 +74,17 @@ export interface ProposedLoad {
   countries: CountryCode[];
   /** Centre of the drops — what the cluster was grown around. */
   centre: LatLng;
-  /** Straight-line depot → stops → depot, in metres. See the caveat above. */
+  /**
+   * Depot → stops → depot, in metres. Road distance when `geometry.leg`
+   * covered every leg; otherwise straight-line. See the caveat above.
+   */
   routeMeters: number;
+  /**
+   * Depot → stops → depot drive time, in seconds, when road geometry covered
+   * **every** leg of this run. `null` the moment one leg fell back to a
+   * straight line — a mix of real and guessed minutes is worse than no figure.
+   */
+  routeSeconds: number | null;
   /** Furthest any drop sits from the cluster centre, in metres. */
   spreadMeters: number;
 }
@@ -108,6 +130,17 @@ function isLocated(order: Order): order is Located {
   return order.delivery_location !== null;
 }
 
+/* --- geometry helpers ------------------------------------------------------ */
+
+/** Road metres between two points, or the straight line where road is unknown. */
+type Metres = (a: LatLng, b: LatLng) => number;
+
+function metresFrom(geometry: PlannerGeometry): Metres {
+  const leg = geometry.leg;
+  if (!leg) return haversineMeters;
+  return (a, b) => leg(a, b)?.distanceMeters ?? haversineMeters(a, b);
+}
+
 /* --- sequencing ------------------------------------------------------------- */
 
 /**
@@ -119,8 +152,11 @@ function isLocated(order: Order): order is Located {
  * and can drag it around in the edit dialog if they disagree. An opaque
  * optimiser that produces a marginally shorter tour nobody trusts is worse
  * than a transparent one they will actually use.
+ *
+ * `metres` is road distance when geometry was supplied, so "nearest" means
+ * nearest on the network, not as the crow flies.
  */
-function sequence(stops: Located[], depot: LatLng): Located[] {
+function sequence(stops: Located[], depot: LatLng, metres: Metres): Located[] {
   const remaining = [...stops];
   const ordered: Located[] = [];
   let cursor = depot;
@@ -129,7 +165,7 @@ function sequence(stops: Located[], depot: LatLng): Located[] {
     let best = 0;
     let bestDistance = Infinity;
     for (let i = 0; i < remaining.length; i += 1) {
-      const d = haversineMeters(cursor, remaining[i].delivery_location);
+      const d = metres(cursor, remaining[i].delivery_location);
       if (d < bestDistance) {
         bestDistance = d;
         best = i;
@@ -143,16 +179,41 @@ function sequence(stops: Located[], depot: LatLng): Located[] {
   return ordered;
 }
 
-function routeLength(stops: Located[], depot: LatLng): number {
-  let total = 0;
+/**
+ * Depot → stops → depot. Metres always; seconds only when road geometry
+ * covered every leg, so the drive-time quote is never a real/guessed mix.
+ */
+function routeStats(
+  stops: Located[],
+  depot: LatLng,
+  geometry: PlannerGeometry,
+): { meters: number; seconds: number | null } {
+  const leg = geometry.leg;
+  let meters = 0;
+  let seconds = 0;
+  let fullyRouted = leg !== undefined;
   let cursor = depot;
+
+  const step = (from: LatLng, to: LatLng) => {
+    const routed = leg?.(from, to) ?? null;
+    if (routed) {
+      meters += routed.distanceMeters;
+      seconds += routed.durationSeconds;
+    } else {
+      meters += haversineMeters(from, to);
+      fullyRouted = false;
+    }
+  };
+
   for (const stop of stops) {
-    total += haversineMeters(cursor, stop.delivery_location);
+    step(cursor, stop.delivery_location);
     cursor = stop.delivery_location;
   }
   // Back to the depot: a plan that ignores the return leg makes a far-flung
   // cluster look cheaper than it is.
-  return total + haversineMeters(cursor, depot);
+  step(cursor, depot);
+
+  return { meters: Math.round(meters), seconds: fullyRouted ? Math.round(seconds) : null };
 }
 
 /* --- clustering ------------------------------------------------------------- */
@@ -169,11 +230,11 @@ function cluster(
   orders: Located[],
   depot: LatLng,
   options: PlannerOptions,
+  metres: Metres,
 ): Located[][] {
   const remaining = [...orders].sort(
     (a, b) =>
-      haversineMeters(depot, b.delivery_location) -
-      haversineMeters(depot, a.delivery_location),
+      metres(depot, b.delivery_location) - metres(depot, a.delivery_location),
   );
 
   const radiusMeters = options.maxRadiusKm * 1000;
@@ -224,6 +285,7 @@ export function planLoads({
   originCountry,
   onLoadOrderIds,
   options = DEFAULT_PLANNER_OPTIONS,
+  geometry = {},
 }: {
   orders: Order[];
   /** Candidate trucks; only `available` ones are used. */
@@ -233,7 +295,10 @@ export function planLoads({
   /** Order ids already committed to a load, so they are never double-booked. */
   onLoadOrderIds: Set<string>;
   options?: PlannerOptions;
+  /** Road distance/time lookup. Omit for straight-line planning. */
+  geometry?: PlannerGeometry;
 }): PlanResult {
+  const metres = metresFrom(geometry);
   const skipped: SkippedOrder[] = [];
   const usable: Located[] = [];
 
@@ -266,8 +331,8 @@ export function planLoads({
   const proposals: ProposedLoad[] = [];
 
   for (const group of groups.values()) {
-    for (const members of cluster(group, depot, options)) {
-      const stops = sequence(members, depot);
+    for (const members of cluster(group, depot, options, metres)) {
+      const stops = sequence(members, depot, metres);
       const points = stops.map((s) => s.delivery_location);
       const centre = centroid(points);
       const countries = [...new Set(stops.map((s) => s.delivery_country))];
@@ -280,13 +345,16 @@ export function planLoads({
         .sort()
         .at(-1) as CustomsRegime;
 
+      const route = routeStats(stops, depot, geometry);
+
       proposals.push({
         stops,
         truck: null,
         regime,
         countries,
         centre,
-        routeMeters: routeLength(stops, depot),
+        routeMeters: route.meters,
+        routeSeconds: route.seconds,
         spreadMeters: Math.max(...points.map((p) => haversineMeters(centre, p))),
       });
     }

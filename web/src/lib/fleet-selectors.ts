@@ -1,3 +1,4 @@
+import { estimateMinutes } from "./format";
 import type { LoadView, Stop } from "./types";
 
 /**
@@ -60,4 +61,38 @@ export function stopsInGeofence(loads: LoadView[]): Stop[] {
         s.distance_m <= GEOFENCE_RADIUS_M,
     ),
   );
+}
+
+/**
+ * Minutes to a stop.
+ *
+ * The routed drive-time when `lib/data/fleet.ts` got one from the provider;
+ * otherwise `estimateMinutes()` — a flat 45 km/h over the straight-line
+ * distance, a display stand-in that must never gate an alert.
+ */
+export function stopEtaMinutes(stop: Stop): number | null {
+  if (stop.eta_source === "routed" && stop.drive_seconds !== null) {
+    return Math.max(1, Math.round(stop.drive_seconds / 60));
+  }
+  return estimateMinutes(stop.distance_m);
+}
+
+/** ETA threshold, in minutes, below which a stop counts as "approaching". */
+export const APPROACH_ETA_MINUTES = 12;
+
+/**
+ * Is the truck closing on this stop?
+ *
+ * When a routed ETA exists it wins — "8 minutes out on the road" is a truer
+ * signal than a straight-line radius. Without one this is exactly the old
+ * rule: inside the 5 km ring the Live Fleet Map draws. Either way this is a
+ * dashboard cue, **not** the trigger for a customer message — that stays with
+ * the (still-unbuilt) geofence engine.
+ */
+export function isApproaching(stop: Stop): boolean {
+  if (stop.delivered_at !== null) return false;
+  if (stop.eta_source === "routed" && stop.drive_seconds !== null) {
+    return stop.drive_seconds <= APPROACH_ETA_MINUTES * 60;
+  }
+  return stop.distance_m !== null && stop.distance_m <= GEOFENCE_RADIUS_M;
 }

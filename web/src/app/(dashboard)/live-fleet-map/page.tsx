@@ -20,7 +20,7 @@ export const metadata: Metadata = { title: "Live Fleet Map" };
 export default async function LiveFleetMapPage() {
   const [trucks, loads, orders] = await Promise.all([
     getTrucks(),
-    getLoads(),
+    getLoads({ routedEtas: true }),
     getOrders(),
   ]);
   const reporting = trucks.filter((t) => t.current_location !== null);

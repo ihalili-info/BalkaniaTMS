@@ -28,14 +28,10 @@ import {
   activeOf,
   loadForTruck,
   nextStop,
+  stopEtaMinutes,
 } from "@/lib/fleet-selectors";
 import { truckDuty, unavailabilityReason } from "@/lib/fleet-status";
-import {
-  estimateMinutes,
-  formatCoords,
-  formatDistance,
-  relativeTime,
-} from "@/lib/format";
+import { formatCoords, formatDistance, relativeTime } from "@/lib/format";
 import { DEFAULT_VIEW, DEPOT, REFERENCE_PLACES } from "@/lib/geo/reference";
 import type { LatLng, LoadView, Order, Truck } from "@/lib/types";
 
@@ -620,10 +616,15 @@ export function FleetMap({
                   mono: true,
                 },
                 {
-                  term: "Rough ETA",
+                  term:
+                    selectedStop?.eta_source === "routed" ? "ETA by road" : "Rough ETA",
                   value: (() => {
-                    const eta = estimateMinutes(selectedStop?.distance_m ?? null);
-                    return eta === null ? "—" : `~${eta} min`;
+                    if (!selectedStop) return "—";
+                    const eta = stopEtaMinutes(selectedStop);
+                    if (eta === null) return "—";
+                    return selectedStop.eta_source === "routed"
+                      ? `${eta} min`
+                      : `~${eta} min`;
                   })(),
                 },
               ].map((row) => (

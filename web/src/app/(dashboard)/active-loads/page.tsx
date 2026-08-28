@@ -26,8 +26,10 @@ import {
   getOrders,
   getRecentAlerts,
   getTrucks,
+  isApproaching,
   loadProgress,
   plannedOf,
+  stopEtaMinutes,
   stopsInGeofence,
 } from "@/lib/data/fleet";
 import {
@@ -36,11 +38,7 @@ import {
   driverHours,
   formatDuration,
 } from "@/lib/driver-hours";
-import {
-  estimateMinutes,
-  formatDistance,
-  relativeTime,
-} from "@/lib/format";
+import { formatDistance, relativeTime } from "@/lib/format";
 import {
   NAV_TARGETS,
   navigationUrl,
@@ -90,9 +88,9 @@ function StopRow({
   }));
 
   const delivered = stop.delivered_at !== null;
-  const inFence =
-    !delivered && stop.distance_m !== null && stop.distance_m <= GEOFENCE_RADIUS_M;
-  const eta = estimateMinutes(stop.distance_m);
+  const approaching = !delivered && isApproaching(stop);
+  const eta = stopEtaMinutes(stop);
+  const routed = stop.eta_source === "routed";
 
   return (
     <li className="relative flex gap-3 px-5 py-2.5">
@@ -131,9 +129,11 @@ function StopRow({
           <span className="font-mono text-data-sm text-ink-subtle">
             {stop.order.crm_order_id}
           </span>
-          {inFence ? (
+          {approaching ? (
             <Badge tone="warn" dot pulse>
-              In geofence
+              {routed && eta !== null
+                ? `Approaching · ${eta} min`
+                : `Within ${GEOFENCE_RADIUS_M / 1000} km`}
             </Badge>
           ) : null}
           {stop.order.notifications_opt_out ? (
@@ -173,8 +173,19 @@ function StopRow({
             <p className="font-mono text-data-sm tabular text-ink">
               {formatDistance(stop.distance_m)}
             </p>
-            <p className="text-caption text-ink-subtle">
-              {eta === null ? "no fix" : `~${eta} min`}
+            <p
+              className="text-caption text-ink-subtle"
+              title={
+                routed
+                  ? "Road drive-time from the truck's current position (Google Routes, live traffic)"
+                  : "Straight-line estimate at 45 km/h — a display stand-in, not alert-grade"
+              }
+            >
+              {eta === null
+                ? "no fix"
+                : routed
+                  ? `${eta} min by road`
+                  : `~${eta} min`}
             </p>
           </>
         )}
@@ -206,11 +217,12 @@ function LoadCard({
   const hasDutyData = load.driver?.duty_synced_at != null;
   const hours = load.driver && hasDutyData ? driverHours(load.driver) : null;
   const nextStop = nextIndex === -1 ? null : load.stops[nextIndex];
-  // Can this driver legally still reach the next drop? Straight-line ETA, so
-  // a planning aid — the tachograph remains the legal record.
+  // Can this driver legally still reach the next drop? Uses the routed
+  // drive-time when there is one, the straight-line stand-in otherwise —
+  // either way a planning aid, the tachograph remains the legal record.
   const reach =
     hours && nextStop
-      ? canDriveFor(hours, estimateMinutes(nextStop.distance_m))
+      ? canDriveFor(hours, stopEtaMinutes(nextStop))
       : { ok: true, reason: null };
   const paperwork = CUSTOMS_REGIME[load.customs_regime].paperwork;
 
@@ -349,7 +361,7 @@ function LoadCard({
 
 export default async function ActiveLoadsPage() {
   const now = new Date();
-  const loads = await getLoads();
+  const loads = await getLoads({ routedEtas: true });
   const activeLoads = activeOf(loads);
   const plannedLoads = plannedOf(loads);
   const alertLog = await getRecentAlerts(loads);

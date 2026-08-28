@@ -19,9 +19,16 @@ import "server-only";
  *
  * So results coarser than a street are refused and sent to the manual
  * "Fix address" path instead of being written.
+ *
+ * **Ireland is a special case worth exploiting.** An Eircode identifies a
+ * single building — it is not a district like a UK outward code or a French
+ * CP. Rural Irish addresses ("the second bungalow past the church, Kilcolman")
+ * are hopeless as a string and pin-sharp as an Eircode, so when the order
+ * carries a well-formed Eircode we try it *on its own* first and only fall
+ * back to the address string if that misses.
  */
 
-import { countryForPoint, country, isInCountry } from "@/lib/regions";
+import { country, countryForPoint, isInCountry } from "@/lib/regions";
 import type { CountryCode } from "@/lib/regions";
 import type { LatLng } from "@/lib/types";
 
@@ -64,6 +71,11 @@ export interface GeocodeOutcome {
   precision: LocationType | null;
   /** Google flagged the match as partial — the address was not fully matched. */
   partial: boolean;
+  /**
+   * Which query produced the result — an Eircode lookup or the address string.
+   * Shown back so a dispatcher can see *why* a rural order suddenly resolved.
+   */
+  matchedBy: "eircode" | "address" | null;
 }
 
 export const GEOCODE_MESSAGE: Record<GeocodeFailure, string> = {
@@ -92,6 +104,99 @@ interface GoogleResult {
   };
 }
 
+/** A single graded Google lookup — one set of query params, one verdict. */
+interface RawMatch {
+  point: LatLng | null;
+  failure: GeocodeFailure | null;
+  formatted: string | null;
+  precision: LocationType | null;
+  partial: boolean;
+}
+
+const NO_MATCH: RawMatch = {
+  point: null,
+  failure: null,
+  formatted: null,
+  precision: null,
+  partial: false,
+};
+
+/**
+ * One request to Google, graded against the precision and country rules.
+ *
+ * `failure` is set for a hard stop (quota, denied, network, nothing found);
+ * `point` is null with no failure when Google answered but the match was too
+ * coarse or landed in the wrong country — the caller may then try another
+ * query before giving up.
+ */
+async function runGeocode(
+  params: URLSearchParams,
+  countryCode: CountryCode,
+): Promise<RawMatch> {
+  let body: { status?: string; results?: GoogleResult[] };
+  try {
+    const response = await fetch(`${ENDPOINT}?${params}`, {
+      // Addresses are corrected by hand; a cached miss would survive the fix.
+      cache: "no-store",
+    });
+    body = await response.json();
+  } catch {
+    return { ...NO_MATCH, failure: "network" };
+  }
+
+  const status = body.status ?? "UNKNOWN_ERROR";
+  if (status === "ZERO_RESULTS") return { ...NO_MATCH, failure: "no_result" };
+  if (status === "OVER_QUERY_LIMIT") return { ...NO_MATCH, failure: "quota" };
+  if (status === "REQUEST_DENIED") return { ...NO_MATCH, failure: "denied" };
+
+  const result = body.results?.[0];
+  const lat = result?.geometry?.location?.lat;
+  const lng = result?.geometry?.location?.lng;
+  if (status !== "OK" || typeof lat !== "number" || typeof lng !== "number") {
+    return { ...NO_MATCH, failure: "no_result" };
+  }
+
+  const precision = (result?.geometry?.location_type ?? null) as LocationType | null;
+  const formatted = result?.formatted_address ?? null;
+  const partial = result?.partial_match === true;
+  const point: LatLng = { lat: +lat.toFixed(6), lng: +lng.toFixed(6) };
+
+  if (!precision || !ACCEPTED.includes(precision)) {
+    return { ...NO_MATCH, failure: null, formatted, precision, partial };
+  }
+
+  // A second, independent check. The component filter should already have kept
+  // us in-country, but a bounding-box test costs nothing and catches the case
+  // where Google satisfies the filter with something implausible.
+  if (!isInCountry(point, countryCode)) {
+    const landedIn = countryForPoint(point);
+    return {
+      ...NO_MATCH,
+      failure: null,
+      formatted: landedIn
+        ? `${formatted ?? "match"} — looks like ${country(landedIn).name}`
+        : formatted,
+      precision,
+      partial,
+    };
+  }
+
+  return { point, failure: null, formatted, precision, partial };
+}
+
+/**
+ * A well-formed Eircode: 3-char routing key + 4-char unique identifier,
+ * returned in the canonical "D02 XY45" spacing. Uses the same shape check as
+ * the rest of the app (`regions.ts`), so the two never drift apart.
+ */
+function normaliseEircode(postcode: string | null): string | null {
+  if (!postcode) return null;
+  const compact = postcode.replace(/\s+/g, "").toUpperCase();
+  if (compact.length !== 7) return null;
+  if (!country("IE").postcodePattern.test(compact)) return null;
+  return `${compact.slice(0, 3)} ${compact.slice(3)}`;
+}
+
 /**
  * One address.
  *
@@ -107,11 +212,58 @@ export async function geocodeAddress(
   countryCode: CountryCode,
   postcode: string | null,
 ): Promise<GeocodeOutcome> {
-  const empty = { point: null, formatted: null, precision: null, partial: false };
+  const empty: GeocodeOutcome = {
+    point: null,
+    failure: null,
+    formatted: null,
+    precision: null,
+    partial: false,
+    matchedBy: null,
+  };
 
   const key = process.env.GEOCODING_API_KEY?.trim();
   if (!key) return { ...empty, failure: "not_configured" };
-  if (address.trim() === "") return { ...empty, failure: "no_result" };
+
+  const trimmedAddress = address.trim();
+  const eircode = countryCode === "IE" ? normaliseEircode(postcode) : null;
+
+  if (trimmedAddress === "" && !eircode) {
+    return { ...empty, failure: "no_result" };
+  }
+
+  // --- pass 1: the Eircode alone (Ireland only) --------------------------
+  // An Eircode is a building, not a district, so querying it on its own is
+  // the most precise lookup available for an Irish order — and it sidesteps a
+  // messy rural address string entirely. Only accepted when it comes back
+  // ROOFTOP/interpolated and in-country; otherwise we fall through.
+  if (eircode) {
+    const params = new URLSearchParams({
+      address: eircode,
+      components: `country:${countryCode}`,
+      key,
+    });
+    const hit = await runGeocode(params, countryCode);
+    // A hard infrastructure failure is worth surfacing now rather than
+    // masking it with a second attempt that will fail the same way.
+    if (hit.failure === "quota" || hit.failure === "denied" || hit.failure === "network") {
+      return { ...empty, failure: hit.failure };
+    }
+    if (hit.point) {
+      return {
+        point: hit.point,
+        failure: null,
+        formatted: hit.formatted,
+        precision: hit.precision,
+        partial: hit.partial,
+        matchedBy: "eircode",
+      };
+    }
+  }
+
+  // --- pass 2: the address string, postcode as a constraint -------------
+  if (trimmedAddress === "") {
+    return { ...empty, failure: "no_result" };
+  }
 
   const components = [`country:${countryCode}`];
   if (postcode && postcode.trim() !== "") {
@@ -119,58 +271,43 @@ export async function geocodeAddress(
   }
 
   const params = new URLSearchParams({
-    address: address.trim(),
+    address: trimmedAddress,
     components: components.join("|"),
     key,
   });
 
-  let body: { status?: string; results?: GoogleResult[] };
-  try {
-    const response = await fetch(`${ENDPOINT}?${params}`, {
-      // Addresses are corrected by hand; a cached miss would survive the fix.
-      cache: "no-store",
-    });
-    body = await response.json();
-  } catch {
-    return { ...empty, failure: "network" };
+  const hit = await runGeocode(params, countryCode);
+
+  if (hit.failure) {
+    return { ...empty, failure: hit.failure };
   }
-
-  const status = body.status ?? "UNKNOWN_ERROR";
-  if (status === "ZERO_RESULTS") return { ...empty, failure: "no_result" };
-  if (status === "OVER_QUERY_LIMIT") return { ...empty, failure: "quota" };
-  if (status === "REQUEST_DENIED") return { ...empty, failure: "denied" };
-
-  const result = body.results?.[0];
-  const lat = result?.geometry?.location?.lat;
-  const lng = result?.geometry?.location?.lng;
-  if (status !== "OK" || typeof lat !== "number" || typeof lng !== "number") {
-    return { ...empty, failure: "no_result" };
-  }
-
-  const precision = (result?.geometry?.location_type ?? null) as LocationType | null;
-  const formatted = result?.formatted_address ?? null;
-  const partial = result?.partial_match === true;
-  const point: LatLng = { lat: +lat.toFixed(6), lng: +lng.toFixed(6) };
-
-  if (!precision || !ACCEPTED.includes(precision)) {
-    return { point: null, failure: "too_coarse", formatted, precision, partial };
-  }
-
-  // A second, independent check. The component filter should already have kept
-  // us in-country, but a bounding-box test costs nothing and catches the case
-  // where Google satisfies the filter with something implausible.
-  if (!isInCountry(point, countryCode)) {
-    const landedIn = countryForPoint(point);
+  if (!hit.point) {
+    // Google answered but the match was unusable. Distinguish the two reasons
+    // the same way the old code did, so the message is still specific.
+    if (hit.precision && !ACCEPTED.includes(hit.precision)) {
+      return {
+        ...empty,
+        failure: "too_coarse",
+        formatted: hit.formatted,
+        precision: hit.precision,
+        partial: hit.partial,
+      };
+    }
     return {
-      point: null,
+      ...empty,
       failure: "wrong_country",
-      formatted: landedIn
-        ? `${formatted ?? "match"} — looks like ${country(landedIn).name}`
-        : formatted,
-      precision,
-      partial,
+      formatted: hit.formatted,
+      precision: hit.precision,
+      partial: hit.partial,
     };
   }
 
-  return { point, failure: null, formatted, precision, partial };
+  return {
+    point: hit.point,
+    failure: null,
+    formatted: hit.formatted,
+    precision: hit.precision,
+    partial: hit.partial,
+    matchedBy: "address",
+  };
 }

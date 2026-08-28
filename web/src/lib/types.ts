@@ -11,6 +11,14 @@ import type { CountryCode, CustomsRegime } from "./regions";
 
 export type LatLng = { lat: number; lng: number };
 
+/**
+ * One road leg from the routing provider: how far by road and how long behind
+ * the wheel. Distinct from `haversineMeters`, which is a straight line and
+ * knows nothing about roads, ferries or traffic. Defined here (not in the
+ * server-only routing client) so client components can hold one.
+ */
+export type RouteLeg = { distanceMeters: number; durationSeconds: number };
+
 export type OrderStatus = "pending" | "assigned" | "en_route" | "delivered";
 export type LoadStatus = "planned" | "active" | "completed";
 export type NotificationType =
@@ -165,6 +173,19 @@ export interface Stop extends LoadItem {
   order: Order;
   /** Straight-line metres from the assigned truck, as `ST_Distance` returns. */
   distance_m: number | null;
+  /**
+   * Road drive-time from the assigned truck to this stop, in seconds, when the
+   * routing provider answered. Only ever populated for a load's *next*
+   * undelivered stop — that is the only ETA a dispatcher acts on, and routing
+   * every stop of every load is needless spend.
+   */
+  drive_seconds: number | null;
+  /**
+   * Where the approach figures came from. `"routed"` means `drive_seconds` and
+   * a road distance are real; `"straight_line"` means everything is
+   * great-circle and `estimateMinutes()` — a planning aid, never alert-grade.
+   */
+  eta_source: "routed" | "straight_line";
   notifications: NotificationType[];
 }
 

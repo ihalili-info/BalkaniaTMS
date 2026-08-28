@@ -78,3 +78,12 @@ export function formatCoords(point: LatLng | null): string {
   if (!point) return "no fix";
   return `${point.lat.toFixed(4)}, ${point.lng.toFixed(4)}`;
 }
+
+/**
+ * A stable string key for a point, for looking a coordinate up in a map that
+ * crossed a server/client boundary (e.g. a pre-computed road-distance matrix).
+ * Five decimals is ~1 m — finer than any coordinate the app stores.
+ */
+export function coordKey(point: LatLng): string {
+  return `${point.lat.toFixed(5)},${point.lng.toFixed(5)}`;
+}
