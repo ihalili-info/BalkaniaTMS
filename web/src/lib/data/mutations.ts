@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { getCurrentUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
-import type { CountryCode } from "@/lib/regions";
+import { normalisePostcode, type CountryCode } from "@/lib/regions";
 import type { LatLng, Order, RouteLeg, Truck } from "@/lib/types";
 import {
   GEOCODE_MESSAGE,
@@ -255,11 +255,16 @@ export async function fixOrderAddress(
     const user = await requireSession();
     const supabase = await createClient();
 
+    const postcode = normalisePostcode(
+      patch.delivery_country,
+      patch.delivery_postcode,
+    );
+
     const { error } = await supabase
       .from("orders")
       .update({
         delivery_address: patch.delivery_address,
-        delivery_postcode: patch.delivery_postcode,
+        delivery_postcode: postcode,
         delivery_country: patch.delivery_country,
         updated_at: new Date().toISOString(),
       })
@@ -279,7 +284,7 @@ export async function fixOrderAddress(
     // any automatic geocode and the DB will not let one overwrite it.
     await saveGeocodeCache(supabase, {
       countryCode: patch.delivery_country,
-      postcode: patch.delivery_postcode,
+      postcode,
       address: patch.delivery_address,
       point: patch.delivery_location,
       source: "manual",

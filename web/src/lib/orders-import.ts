@@ -10,7 +10,13 @@
  * mainland EU orders is validated against that country's format, not Ireland's.
  */
 
-import { COUNTRIES, HOME_COUNTRY, country, type CountryCode } from "./regions";
+import {
+  COUNTRIES,
+  HOME_COUNTRY,
+  country,
+  normalisePostcode,
+  type CountryCode,
+} from "./regions";
 import type { Order } from "./types";
 
 /* --- the column schema ------------------------------------------------------ */
@@ -228,9 +234,11 @@ export function validateRows(
     }
 
     // --- postcode: a warning, never a block. Postal data is messy, and a
-    //     wrong-looking Eircode is still better than dropping the order. ---
-    const postcode = values.delivery_postcode;
-    if (postcode !== "" && COUNTRIES[countryCode]) {
+    //     wrong-looking Eircode is still better than dropping the order.
+    //     Stored in canonical form ("N39 HX56", not "n39hx56") so the queue
+    //     shows one spelling per place and the geocode cache keys them alike. ---
+    const postcode = normalisePostcode(countryCode, values.delivery_postcode);
+    if (postcode !== null && COUNTRIES[countryCode]) {
       const spec = country(countryCode);
       if (!spec.postcodePattern.test(postcode)) {
         issues.push({
@@ -319,7 +327,7 @@ export function validateRows(
             created_at: nowIso,
             updated_at: nowIso,
             delivery_country: countryCode,
-            delivery_postcode: postcode === "" ? null : postcode,
+            delivery_postcode: postcode,
             notifications_opt_out: optOut ?? false,
             opted_out_at: optOut ? nowIso : null,
           },
