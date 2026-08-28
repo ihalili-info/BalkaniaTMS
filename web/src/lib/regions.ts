@@ -162,6 +162,30 @@ export function country(code: CountryCode): Country {
   );
 }
 
+/* --- country code shapes -------------------------------------------------- */
+
+/**
+ * ISO 3166-1 alpha-3 → our alpha-2 code. Provider feeds (Verizon Reveal
+ * reverse-geocodes each fix with an alpha-3 `country`) use the three-letter
+ * form; the app is alpha-2 throughout. Northern Ireland comes through as `GBR`
+ * — the GB bounding box covers it, which is all this is used for.
+ */
+const ALPHA3_TO_CODE: Record<string, CountryCode> = {
+  IRL: "IE",
+  GBR: "GB",
+  FRA: "FR",
+  NLD: "NL",
+  DEU: "DE",
+  BEL: "BE",
+};
+
+export function countryFromAlpha3(
+  alpha3: string | null | undefined,
+): CountryCode | null {
+  if (!alpha3) return null;
+  return ALPHA3_TO_CODE[alpha3.trim().toUpperCase()] ?? null;
+}
+
 /* --- postcodes ------------------------------------------------------------- */
 
 /**

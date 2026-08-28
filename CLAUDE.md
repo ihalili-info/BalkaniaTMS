@@ -36,6 +36,9 @@ keep it and `supabase/migrations/` in sync.
     (navigation links). Drivers only, never customers.
   - `0006_fleetmatics_gps.sql` — `trucks.gps_sequence_id` and `last_known_address`
     for the Verizon Connect Reveal push feed
+  - `0013_truck_gps_esn.sql` — `trucks.gps_esn`: the device ESN, a fallback join
+    key for the GPS webhook when a fix carries no Vehicle Number. Also widens
+    `trucks_geo`.
   - `0011_driver_vehicle.sql` — `drivers.assigned_truck_id` / `assigned_at`: the
     truck a driver normally runs. Deliberately **not** unique — double-shifting
     one tractor is normal — and stamped by a trigger so an unrelated edit does
@@ -145,9 +148,30 @@ Auth, and the asymmetry is easy to get wrong:
   `Authorization: Atmosphere atmosphere_app_id={appId}, Bearer {token}`. The
   token call is the one request that does *not* take the app id.
 - **Push:** Basic auth on the inbound request, with a username and password
-  **we choose** and hand to Verizon when registering the endpoint. They are not
-  issued by Verizon. Registration is not self-serve — it goes through Reveal
-  (API integrations → SUBMIT ENDPOINTS → GPS webhook) or their support.
+  **we choose** and enter in Reveal's "Submit GPS webhook endpoints" form
+  (`reveal.eu.vzconnect.com` → admin → integration → partner integrations →
+  webhook), alongside the URL. Not issued by Verizon. The creds must avoid
+  `/ \ ' " : @`; the hostname must have no underscore.
+
+**The push feed is AWS SNS.** Two message types on the `x-amz-sns-message-type`
+header, though the code detects them by content:
+
+- **`SubscriptionConfirmation`** arrives **first, with no credentials**. The
+  endpoint must answer `401` + `WWW-Authenticate: Basic` — that is the protocol,
+  not a rejection — and SNS retries *with* credentials. Then the `SubscribeURL`
+  in the body is fetched (`confirmSubscription`, SSRF-allow-listed to AWS /
+  Verizon hosts) to activate the feed. The token **expires after 3 days**; if
+  the handshake never completes, resubmit the endpoint in Reveal for a fresh one.
+- **`Notification`** is a **CloudEvent**: the position is under `data`, in
+  camelCase (`data.sequenceId`, `data.vehicle.number`, `data.latitude`, …).
+  Verizon's C# reference models are PascalCase only because .NET deserialises
+  case-insensitively. `normaliseGpsPush()` reads every key case-insensitively
+  and unwraps `data`, so both shapes parse. `Content-Type` is always
+  `text/plain` — read the raw body, then `JSON.parse`.
+
+**15-second ack deadline, only `200` counts, 2 retries then discarded.** Writes
+are small enough to stay in the request path for now; heavy work would need a
+queue.
 
 **Fleet sync.** `Sync from Reveal` on the Fleet page pulls `/cmd/v1/vehicles`
 and creates/updates truck rows keyed on Vehicle Number. Two rules make it safe
@@ -161,15 +185,25 @@ The vehicle-list response fields are **not publicly documented**, so
 record; the preview dialog shows it so the mapping can be confirmed against a
 real payload rather than assumed.
 
-`trucks.gps_device_id` holds Reveal's **Vehicle Number** — not the device
-serial or ESN. Verizon does not populate that field automatically; it has to be
-set per vehicle in Reveal or nothing matches.
+**Matching a fix to a truck: Vehicle Number, then ESN.** `trucks.gps_device_id`
+holds Reveal's **Vehicle Number**; Verizon does not populate it automatically,
+so a fix can arrive with only `vehicle.esn` (which the guide calls the
+"mandatory" key). Migration 0013 adds `trucks.gps_esn` as a fallback the webhook
+matches on — `Sync from Reveal` fills it on create when the list response
+carries it. A fix that matches neither is reported, not an error.
 
 Webhook deliveries retry, duplicate and arrive out of order, so every write is
 guarded by `SequenceId` (`isNewerFix`). Without it a late delivery overwrites a
 newer position and the truck jumps backwards on the live map. Positions that
-fail validation — no vehicle number, unparseable `UpdateUTC`, or `0,0` null
-island from a device with no fix — are rejected rather than coerced.
+fail validation — no identifier, unparseable `updateUTC`, or `0,0` null island
+from a device with no fix — are rejected rather than coerced. A trip flagged
+`isPrivate` (Verizon strips the coordinates) is **skipped, not rejected** — it
+is a deliberate state.
+
+**Transposition guard.** The reverse-geocoded `address.country` (ISO alpha-3)
+is used as an anchor: if the fix's coordinates are not in that country but the
+mirror image is, the feed sent lat/lng the wrong way round and they are
+swapped. Without this a transposed fix plots the truck in the Southern Ocean.
 
 The push payload is reverse-geocoded by Verizon, so `last_known_address` comes
 free with every fix.

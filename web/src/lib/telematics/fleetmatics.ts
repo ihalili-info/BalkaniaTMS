@@ -24,6 +24,8 @@
  *   https://fim.eu.fleetmatics.com/content/home/support/samplecode/GET_Vehicle_Location.htm
  */
 
+import { countryFromAlpha3, isInCountry } from "@/lib/regions";
+
 /* --- configuration ---------------------------------------------------------- */
 
 export interface FleetmaticsConfig {
@@ -181,45 +183,27 @@ export async function fetchVehicleLocation(
 /* --- push: the GPS webhook payload ------------------------------------------- */
 
 /**
- * The GPS Push Service message. Schema is fixed by Verizon and cannot be
- * changed on their side, so this mirrors it rather than reshaping it.
+ * The GPS Push Service message.
  *
- * Everything is optional in practice: a position taken with no driver signed
- * in has no `Driver`, and reverse geocoding can fail, leaving `Address` empty.
+ * The wire format is an AWS SNS `Notification` whose body is a **CloudEvent**:
+ * the position lives under `data`, and the field names are camelCase
+ * (`sequenceId`, `updateUTC`, `latitude`, `vehicle.number`, `vehicle.esn`, …).
+ * Verizon's own C# reference models are PascalCase because .NET deserialises
+ * case-insensitively — the JSON on the wire is not. So `normaliseGpsPush`
+ * reads every key case-insensitively and unwraps `data` if present, which
+ * accepts both shapes without guessing which arrived.
+ *
+ * A `subject` of `"vehicle.esn.342434234"` identifies the vehicle at the
+ * envelope level too; `data.vehicle` is what we actually read.
  */
-export interface FleetmaticsGpsPush {
-  SequenceId?: number | string;
-  UpdateUTC?: string;
-  DeviceTimeZoneOffset?: number;
-  DisplayState?: string;
-  SpeedKmph?: number;
-  DirectionDegrees?: number;
-  Latitude?: number;
-  Longitude?: number;
-  OdometerKm?: number;
-  Vehicle?: {
-    Number?: string;
-    Name?: string;
-    VIN?: string;
-    ESN?: string;
-  };
-  Address?: {
-    AddressLine1?: string;
-    Locality?: string;
-    PostalCode?: string;
-    AdministrativeArea?: string;
-    Country?: string;
-  };
-  Driver?: {
-    DriverNumber?: string;
-    DriverFirstName?: string;
-    DriverLastName?: string;
-  };
-}
+export type FleetmaticsGpsPush = Record<string, unknown>;
 
 /** What the app actually stores, once a push has been validated. */
 export interface VehicleFix {
-  vehicleNumber: string;
+  /** Reveal Vehicle Number (`data.vehicle.number`). May be empty in the feed. */
+  vehicleNumber: string | null;
+  /** Reveal ESN (`data.vehicle.esn`) — the doc's "mandatory" join key. */
+  esn: string | null;
   lat: number;
   lng: number;
   recordedAt: string;
@@ -236,58 +220,125 @@ export interface VehicleFix {
 
 export type NormaliseResult =
   | { ok: true; fix: VehicleFix }
-  | { ok: false; reason: string };
+  | {
+      ok: false;
+      reason: string;
+      /** A private trip is a deliberate state, not a bad delivery — skip, don't reject. */
+      skip?: boolean;
+      /** Best-effort vehicle identifier, for the delivery log. */
+      identifier?: string | null;
+    };
+
+/** Lower-cases every key of an object one level deep. */
+function lowerKeys(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null) return {};
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value)) out[k.toLowerCase()] = v;
+  return out;
+}
+
+function asText(value: unknown): string | null {
+  if (typeof value === "string") return value.trim() || null;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return null;
+}
 
 /**
  * Validates and flattens one push message.
  *
- * Rejects rather than coerces: a position without a vehicle number cannot be
- * matched to a truck, and `0,0` in the Gulf of Guinea is the classic
- * null-island artefact of a device with no fix, not a delivery in the Atlantic.
+ * Rejects rather than coerces: a position we cannot tie to a vehicle is
+ * useless, `0,0` in the Gulf of Guinea is the classic null-island artefact of
+ * a device with no fix, and a fix whose coordinates are transposed would put
+ * the truck in the Southern Ocean — the reverse-geocoded country is used to
+ * catch that.
  */
 export function normaliseGpsPush(payload: FleetmaticsGpsPush): NormaliseResult {
-  const vehicleNumber = payload.Vehicle?.Number?.trim();
-  if (!vehicleNumber) return { ok: false, reason: "missing Vehicle.Number" };
+  const envelope = lowerKeys(payload);
+  // CloudEvent: the position is under `data`. A flat message is its own data.
+  const d = "data" in envelope ? lowerKeys(envelope.data) : envelope;
 
-  const { Latitude: lat, Longitude: lng } = payload;
-  if (typeof lat !== "number" || typeof lng !== "number") {
-    return { ok: false, reason: "missing or non-numeric coordinates" };
+  const vehicle = lowerKeys(d.vehicle);
+  const vehicleNumber = asText(vehicle.number);
+  const esn = asText(vehicle.esn) ?? esnFromSubject(asText(envelope.subject));
+  const identifier = vehicleNumber ?? esn;
+  if (!identifier) {
+    return { ok: false, reason: "no vehicle number or ESN in the message" };
   }
-  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) {
-    return { ok: false, reason: "coordinates out of range" };
+
+  // A privacy trip: Verizon strips coordinates, address and speed. Not an error.
+  if (d.isprivate === true) {
+    return { ok: false, reason: "private trip — no position sent", skip: true, identifier };
+  }
+
+  let lat = numberOrNull(d.latitude);
+  let lng = numberOrNull(d.longitude);
+  if (lat === null || lng === null) {
+    return { ok: false, reason: "missing or non-numeric coordinates", identifier };
   }
   if (lat === 0 && lng === 0) {
-    return { ok: false, reason: "null island (0,0) — device has no fix" };
+    return { ok: false, reason: "null island (0,0) — device has no fix", identifier };
   }
 
-  const recordedAt = parseUpdateUtc(payload.UpdateUTC);
-  if (!recordedAt) return { ok: false, reason: "missing or unparseable UpdateUTC" };
+  // Transposition guard. Verizon reverse-geocodes every fix, so `country`
+  // (ISO alpha-3) is a reliable anchor: if the point is not in that country
+  // but its mirror image is, the feed sent lat/lng the wrong way round.
+  const address = lowerKeys(d.address);
+  const expected = countryFromAlpha3(asText(address.country));
+  if (expected) {
+    const here = { lat, lng };
+    const swapped = { lat: lng, lng: lat };
+    if (!isInCountry(here, expected) && isInCountry(swapped, expected)) {
+      lat = swapped.lat;
+      lng = swapped.lng;
+    }
+  }
 
-  const address = [
-    payload.Address?.AddressLine1,
-    payload.Address?.Locality,
-    payload.Address?.PostalCode,
-  ]
-    .map((part) => part?.trim())
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    return { ok: false, reason: "coordinates out of range", identifier };
+  }
+
+  const recordedAt = parseUpdateUtc(asText(d.updateutc) ?? undefined);
+  if (!recordedAt) {
+    return { ok: false, reason: "missing or unparseable updateUTC", identifier };
+  }
+
+  const line = [address.addressline1, address.locality, address.postalcode]
+    .map((part) => asText(part))
     .filter(Boolean)
     .join(", ");
+
+  const driver = lowerKeys(d.driver);
 
   return {
     ok: true,
     fix: {
       vehicleNumber,
+      esn,
       lat,
       lng,
       recordedAt,
-      sequenceId: toSequence(payload.SequenceId),
-      speedKmph: numberOrNull(payload.SpeedKmph),
-      headingDegrees: numberOrNull(payload.DirectionDegrees),
-      odometerKm: numberOrNull(payload.OdometerKm),
-      displayState: payload.DisplayState?.trim() || null,
-      address: address === "" ? null : address,
-      driverNumber: payload.Driver?.DriverNumber?.trim() || null,
+      sequenceId: toSequence(
+        typeof d.sequenceid === "number" || typeof d.sequenceid === "string"
+          ? d.sequenceid
+          : undefined,
+      ),
+      speedKmph: numberOrNull(d.speedkmph),
+      headingDegrees: numberOrNull(d.directiondegrees),
+      odometerKm: numberOrNull(d.odometerkm),
+      // `displayState` is a string ("Idle") in the payload but the field table
+      // also lists numeric codes — accept either.
+      displayState: asText(d.displaystate),
+      address: line === "" ? null : line,
+      driverNumber: asText(driver.drivernumber),
     },
   };
+}
+
+/** `"vehicle.esn.342434234"` → `"342434234"`. */
+function esnFromSubject(subject: string | null): string | null {
+  if (!subject) return null;
+  const m = /vehicle\.esn\.(\d+)/i.exec(subject);
+  return m ? m[1] : null;
 }
 
 /**
@@ -363,6 +414,13 @@ export function isNewerFix(
 export interface RevealVehicle {
   /** The identifier everything keys on. Stored as `trucks.gps_device_id`. */
   vehicleNumber: string;
+  /**
+   * The device ESN — the GPS webhook's fallback join key when a fix carries no
+   * Vehicle Number. Stored as `trucks.gps_esn`. Often absent from this list
+   * response (the fields are undocumented), which is why the webhook match is
+   * "Number OR ESN" rather than ESN alone.
+   */
+  esn: string | null;
   name: string | null;
   registration: string | null;
   make: string | null;
@@ -406,6 +464,7 @@ export function normaliseVehicle(
 
   return {
     vehicleNumber,
+    esn: str(pick(row, "ESN", "Esn", "SerialNumber", "DeviceSerialNumber", "DeviceId")),
     name: str(pick(row, "Name", "VehicleName", "Label", "DisplayName")),
     registration: str(
       pick(row, "RegistrationNumber", "Registration", "LicensePlate", "Plate", "Tag"),

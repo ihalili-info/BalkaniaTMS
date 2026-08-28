@@ -27,6 +27,8 @@ import {
 
 export interface SyncPlanRow {
   vehicleNumber: string;
+  /** Device ESN, when Reveal's list carries it — set on create only. */
+  esn: string | null;
   plate: string;
   label: string | null;
   makeModel: string | null;
@@ -100,6 +102,7 @@ export async function planVehicleSync(): Promise<SyncPlan> {
       if (!current) {
         return {
           vehicleNumber: v.vehicleNumber,
+          esn: v.esn,
           plate,
           label: v.name,
           makeModel,
@@ -114,6 +117,7 @@ export async function planVehicleSync(): Promise<SyncPlan> {
 
       return {
         vehicleNumber: v.vehicleNumber,
+        esn: v.esn,
         plate,
         label: v.name,
         makeModel,
@@ -164,6 +168,7 @@ export async function applyVehicleSync(): Promise<SyncResult> {
         const { error } = await supabase.from("trucks").insert({
           license_plate: row.plate,
           gps_device_id: row.vehicleNumber,
+          gps_esn: row.esn,
           label: row.label,
           make_model: row.makeModel,
         });

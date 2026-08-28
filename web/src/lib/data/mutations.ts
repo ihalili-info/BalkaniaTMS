@@ -56,10 +56,18 @@ async function requireSession() {
 
 /* --- trucks ----------------------------------------------------------------- */
 
-/** Fields a dispatcher owns. The telematics columns are deliberately absent. */
+/**
+ * Fields a dispatcher owns. `current_location` / `location_updated_at` are
+ * deliberately absent — those belong to the telematics feed. `gps_device_id`
+ * and `gps_esn` look telematics-owned but are not: Verizon never sets them on
+ * its own, so a dispatcher types them here to match what Reveal has for the
+ * vehicle.
+ */
 const TRUCK_FIELDS = [
   "label",
   "make_model",
+  "gps_device_id",
+  "gps_esn",
   "capacity_kg",
   "capacity_m3",
   "pallet_slots",

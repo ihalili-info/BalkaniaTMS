@@ -57,6 +57,8 @@ export function readSubscription(
  * the convenience without the hole.
  */
 const ALLOWED_HOSTS = [
+  // Suffix-matched, so the EU regional SNS hosts (sns.eu-west-1.amazonaws.com,
+  // sns.eu-central-1.amazonaws.com, …) are covered without listing each.
   "amazonaws.com",
   "fleetmatics.com",
   "verizonconnect.com",

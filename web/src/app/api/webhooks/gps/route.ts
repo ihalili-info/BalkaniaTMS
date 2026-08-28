@@ -114,10 +114,6 @@ function authorised(request: Request): boolean {
 }
 
 export async function POST(request: Request) {
-  // The body is read first because the subscription handshake has to be
-  // handled even when it arrives without credentials. Verizon's confirmation
-  // is the message that *activates* the feed; rejecting it as unauthorized
-  // would silently burn the three-day window and cancel the submission.
   const raw = await request.text();
 
   let payload: unknown = null;
@@ -127,6 +123,26 @@ export async function POST(request: Request) {
     payload = null;
   }
 
+  // Auth first, and the 401 is part of the protocol, not a rejection. AWS SNS
+  // (which is what carries this feed) sends the very first
+  // `SubscriptionConfirmation` with **no credentials**, expects
+  // `401 WWW-Authenticate: Basic`, then retries the same request *with*
+  // credentials — which Verizon holds from the endpoint submission form. So a
+  // bare 401 here is what activates the feed; it is not what burns the window.
+  if (!authorised(request)) {
+    await logDeliveries([
+      {
+        vehicle_number: null,
+        outcome: "unauthorized",
+        reason: "Basic auth missing or wrong — sent 401 challenge",
+      },
+    ]);
+    return unauthorized();
+  }
+
+  // Now authenticated. The confirmation handshake carries a SubscribeURL that
+  // has to be fetched for positions to start flowing; the token expires in
+  // three days.
   const subscription = readSubscription(payload);
   if (subscription) {
     const result = await confirmSubscription(subscription.subscribeUrl);
@@ -147,19 +163,6 @@ export async function POST(request: Request) {
       { subscription: result.confirmed ? "confirmed" : "pending" },
       { status: 200 },
     );
-  }
-
-  if (!authorised(request)) {
-    // Logged too: "Verizon is calling but the credentials are wrong" looks
-    // exactly like "Verizon has never called" without this.
-    await logDeliveries([
-      {
-        vehicle_number: null,
-        outcome: "unauthorized",
-        reason: "Basic auth rejected",
-      },
-    ]);
-    return unauthorized();
   }
 
   if (payload === null) {
@@ -186,10 +189,17 @@ export async function POST(request: Request) {
     const result = normaliseGpsPush(message);
     if (result.ok) {
       accepted.push(result.fix);
+    } else if (result.skip) {
+      // A deliberate state (a privacy trip), not a bad delivery.
+      log.push({
+        vehicle_number: result.identifier ?? null,
+        outcome: "skipped",
+        reason: result.reason,
+      });
     } else {
       rejected.push({ reason: result.reason });
       log.push({
-        vehicle_number: message.Vehicle?.Number ?? null,
+        vehicle_number: result.identifier ?? null,
         outcome: "rejected",
         reason: result.reason,
         payload: message,
@@ -218,25 +228,45 @@ export async function POST(request: Request) {
   const skipped: string[] = [];
 
   for (const fix of accepted) {
-    // `gps_device_id` holds Reveal's Vehicle Number.
-    const { data: truck, error } = await supabase
+    // Reveal identifiers are alphanumeric; strip anything else before it goes
+    // into a PostgREST filter string (the payload is attacker-influenceable
+    // once the webhook password is known).
+    const clean = (v: string | null) => v?.replace(/[^A-Za-z0-9_-]/g, "") || null;
+    const vehicleNumber = clean(fix.vehicleNumber);
+    const esn = clean(fix.esn);
+    const label = vehicleNumber ?? esn ?? "unknown";
+
+    // Match on Vehicle Number (`gps_device_id`), then fall back to ESN
+    // (`gps_esn`, migration 0013) — the doc's "mandatory" identifier, and the
+    // only one present when a vehicle has no Number set in Reveal.
+    const or: string[] = [];
+    if (vehicleNumber) or.push(`gps_device_id.eq.${vehicleNumber}`);
+    if (esn) or.push(`gps_esn.eq.${esn}`);
+    if (or.length === 0) {
+      skipped.push(`${label}: no usable identifier`);
+      continue;
+    }
+
+    const { data: trucks, error } = await supabase
       .from("trucks")
       .select("id, gps_sequence_id, location_updated_at")
-      .eq("gps_device_id", fix.vehicleNumber)
-      .maybeSingle();
+      .or(or.join(","))
+      .limit(1);
 
     if (error) {
       return Response.json({ error: error.message }, { status: 500 });
     }
+    const truck = trucks?.[0];
     if (!truck) {
       // A vehicle in Reveal that is not in our fleet is not an error — it is a
-      // truck someone has not added yet.
-      skipped.push(`${fix.vehicleNumber}: no matching truck`);
+      // truck someone has not added yet, or one whose Vehicle Number / ESN is
+      // not filled in on the Fleet page.
+      skipped.push(`${label}: no matching truck`);
       log.push({
-        vehicle_number: fix.vehicleNumber,
+        vehicle_number: label,
         outcome: "skipped",
-        reason: "no truck with this Vehicle Number",
-        payload: { Vehicle: { Number: fix.vehicleNumber } },
+        reason: "no truck with this Vehicle Number or ESN",
+        payload: { vehicle: { number: fix.vehicleNumber, esn: fix.esn } },
       });
       continue;
     }
@@ -248,9 +278,9 @@ export async function POST(request: Request) {
       recordedAt: truck.location_updated_at,
     });
     if (!isNewer) {
-      skipped.push(`${fix.vehicleNumber}: stale or duplicate`);
+      skipped.push(`${label}: stale or duplicate`);
       log.push({
-        vehicle_number: fix.vehicleNumber,
+        vehicle_number: label,
         outcome: "skipped",
         reason: "stale or duplicate (SequenceId not newer)",
       });
@@ -274,7 +304,7 @@ export async function POST(request: Request) {
     }
     stored += 1;
     log.push({
-      vehicle_number: fix.vehicleNumber,
+      vehicle_number: label,
       outcome: "stored",
       reason: null,
     });

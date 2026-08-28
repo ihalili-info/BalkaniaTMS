@@ -47,6 +47,7 @@ export async function getTrucks(): Promise<Truck[]> {
     id: row.id,
     license_plate: row.license_plate,
     gps_device_id: row.gps_device_id,
+    gps_esn: row.gps_esn ?? null,
     current_location: point(row),
     location_updated_at: row.location_updated_at,
     label: row.label,

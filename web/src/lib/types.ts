@@ -35,7 +35,10 @@ export type TruckAvailability = "available" | "unavailable" | "maintenance";
 export interface Truck {
   id: string;
   license_plate: string;
+  /** Reveal Vehicle Number — the GPS webhook's primary join key. */
   gps_device_id: string;
+  /** Reveal device ESN — the webhook's fallback join key (migration 0013). */
+  gps_esn: string | null;
 
   /* --- owned by the telematics feed --- */
   current_location: LatLng | null;

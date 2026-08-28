@@ -62,6 +62,7 @@ export function TruckEditor({
   const [label, setLabel] = useState(truck.label ?? "");
   const [makeModel, setMakeModel] = useState(truck.make_model ?? "");
   const [gpsDeviceId, setGpsDeviceId] = useState(truck.gps_device_id);
+  const [gpsEsn, setGpsEsn] = useState(truck.gps_esn ?? "");
   const [kg, setKg] = useState(truck.capacity_kg?.toString() ?? "");
   const [m3, setM3] = useState(truck.capacity_m3?.toString() ?? "");
   const [pallets, setPallets] = useState(truck.pallet_slots?.toString() ?? "");
@@ -121,6 +122,7 @@ export function TruckEditor({
       label: toNullableText(label),
       make_model: toNullableText(makeModel),
       gps_device_id: gpsDeviceId.trim(),
+      gps_esn: toNullableText(gpsEsn),
       capacity_kg: toNullableInt(kg),
       capacity_m3: toNullableNum(m3),
       pallet_slots: toNullableInt(pallets),
@@ -491,20 +493,35 @@ export function TruckEditor({
           <section>
             <h3 className="mb-1 text-heading text-ink">GPS matching</h3>
             <p className="mb-3 text-caption text-ink-subtle">
-              Reveal&rsquo;s Vehicle Number, not the device serial or ESN.
-              Verizon never sets this on its own — it has to match what is
-              entered for this vehicle in Reveal, or the GPS webhook has
-              nothing to match the incoming fix against.
+              How an incoming GPS fix is tied to this truck. Verizon sets
+              neither field on its own — they have to match what Reveal has for
+              this vehicle. The webhook tries the Vehicle Number first, then the
+              ESN.
             </p>
-            <Field label="GPS device ID" htmlFor="gps-device-id">
-              <input
-                id="gps-device-id"
-                className={controlClass}
-                value={gpsDeviceId}
-                onChange={(e) => setGpsDeviceId(e.target.value)}
-                placeholder="e.g. 10234"
-              />
-            </Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Vehicle Number" htmlFor="gps-device-id">
+                <input
+                  id="gps-device-id"
+                  className={controlClass}
+                  value={gpsDeviceId}
+                  onChange={(e) => setGpsDeviceId(e.target.value)}
+                  placeholder="e.g. 10234"
+                />
+              </Field>
+              <Field
+                label="Device ESN"
+                htmlFor="gps-esn"
+                hint="Fallback key — fills in from Sync when Reveal provides it"
+              >
+                <input
+                  id="gps-esn"
+                  className={controlClass}
+                  value={gpsEsn}
+                  onChange={(e) => setGpsEsn(e.target.value)}
+                  placeholder="e.g. 342434234"
+                />
+              </Field>
+            </div>
           </section>
 
           {/* Owned by the telematics feed, so read-only here. Showing it makes
