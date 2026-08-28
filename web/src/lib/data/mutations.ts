@@ -12,6 +12,12 @@ import {
   geocodingConfigured,
 } from "@/lib/geocoding/google";
 import {
+  cacheSourceForPrecision,
+  isStrongCacheHit,
+  lookupGeocodeCache,
+  saveGeocodeCache,
+} from "@/lib/geocoding/cache";
+import {
   ROUTING_MESSAGE,
   routeMatrix,
   routingConfigured,
@@ -190,20 +196,45 @@ export async function importOrders(orders: Order[]): Promise<ImportOrdersResult>
     // Coordinates go through the RPC, because PostgREST cannot write a
     // GEOGRAPHY column directly.
     const byRef = new Map((data ?? []).map((r) => [r.crm_order_id, r.id]));
+    let fromCache = 0;
     for (const o of orders) {
       const id = byRef.get(o.crm_order_id);
-      if (!id || !o.delivery_location) continue;
+      if (!id) continue;
+
+      // A coordinate in the file wins — it was supplied deliberately.
+      let point = o.delivery_location;
+
+      // Otherwise, an address we have resolved before. A weak
+      // (`geometric_center`) cache entry is still better than queuing the order
+      // for a geocode that will likely land on the same street centroid.
+      if (!point) {
+        const cached = await lookupGeocodeCache(
+          supabase,
+          o.delivery_country,
+          o.delivery_postcode,
+          o.delivery_address,
+        );
+        if (cached) {
+          point = cached.point;
+          fromCache += 1;
+        }
+      }
+
+      if (!point) continue;
       await supabase.rpc("set_order_location", {
         p_order_id: id,
-        p_lat: o.delivery_location.lat,
-        p_lng: o.delivery_location.lng,
+        p_lat: point.lat,
+        p_lng: point.lng,
       });
     }
 
     revalidatePath("/orders-queue");
     return {
       ok: true,
-      message: `Imported ${rows.length} orders.`,
+      message:
+        fromCache > 0
+          ? `Imported ${rows.length} orders. ${fromCache} placed from previously saved locations.`
+          : `Imported ${rows.length} orders.`,
       ids: Object.fromEntries(byRef),
     };
   } catch (e) {
@@ -221,7 +252,7 @@ export async function fixOrderAddress(
   },
 ): Promise<WriteResult> {
   try {
-    await requireSession();
+    const user = await requireSession();
     const supabase = await createClient();
 
     const { error } = await supabase
@@ -242,6 +273,18 @@ export async function fixOrderAddress(
       p_lng: patch.delivery_location.lng,
     });
     if (geoError) return { ok: false, message: geoError.message };
+
+    // Remember it as a human-verified point, so the next import of this address
+    // reuses it instead of asking someone to place it again. `manual` outranks
+    // any automatic geocode and the DB will not let one overwrite it.
+    await saveGeocodeCache(supabase, {
+      countryCode: patch.delivery_country,
+      postcode: patch.delivery_postcode,
+      address: patch.delivery_address,
+      point: patch.delivery_location,
+      source: "manual",
+      verifiedBy: user.id,
+    });
 
     revalidatePath("/orders-queue");
     revalidatePath("/live-fleet-map");
@@ -958,6 +1001,11 @@ export interface GeocodeBatchResult extends WriteResult {
  * Coarse matches are **not** written. `lib/geocoding/google.ts` explains why at
  * length; the short version is that a town-centre coordinate is invisible once
  * stored and fires customer alerts from the wrong place.
+ *
+ * The geocode cache (migration 0012) sits in front of Google: a strong hit —
+ * a `manual` fix or a rooftop match seen before — is reused without a lookup;
+ * a weak (`geometric_center`) hit is kept only as a fallback if Google fails;
+ * every fresh success is written back for next time.
  */
 export async function geocodeOrders(ids: string[]): Promise<GeocodeBatchResult> {
   const empty = { located: 0, lines: [] as GeocodeLine[] };
@@ -983,26 +1031,66 @@ export async function geocodeOrders(ids: string[]): Promise<GeocodeBatchResult> 
     let located = 0;
 
     for (const order of orders ?? []) {
-      const result = await geocodeAddress(
-        order.delivery_address,
+      const cached = await lookupGeocodeCache(
+        supabase,
         order.delivery_country,
         order.delivery_postcode,
+        order.delivery_address,
       );
 
-      if (!result.point) {
-        lines.push({
-          orderId: order.id,
-          reference: order.crm_order_id,
-          outcome: "failed",
-          detail: GEOCODE_MESSAGE[result.failure ?? "no_result"],
-        });
-        continue;
+      let point = null as { lat: number; lng: number } | null;
+      let detail = "";
+
+      if (cached && isStrongCacheHit(cached.source)) {
+        point = cached.point;
+        detail = `${cached.formatted ?? "matched"} · from a saved ${
+          cached.source === "manual" ? "manual fix" : "location"
+        }`;
+      } else {
+        const result = await geocodeAddress(
+          order.delivery_address,
+          order.delivery_country,
+          order.delivery_postcode,
+        );
+        if (result.point) {
+          point = result.point;
+          detail = `${result.formatted ?? "matched"}${
+            result.matchedBy === "eircode" ? " · via Eircode" : ""
+          }${result.partial ? " · partial match — check it" : ""}`;
+          // Write it back — including the precision, so a later reuse knows
+          // how much to trust it.
+          const source = cacheSourceForPrecision(result.precision);
+          if (source) {
+            await saveGeocodeCache(supabase, {
+              countryCode: order.delivery_country,
+              postcode: order.delivery_postcode,
+              address: order.delivery_address,
+              point: result.point,
+              source,
+              formatted: result.formatted,
+            });
+          }
+        } else if (cached) {
+          // Google gave nothing usable, but we have a weak cached point.
+          // Better a known street centroid than leaving the order blank.
+          point = cached.point;
+          detail = `${cached.formatted ?? "matched"} · from a saved approximate location — check it`;
+        } else {
+          lines.push({
+            orderId: order.id,
+            reference: order.crm_order_id,
+            outcome: "failed",
+            detail: GEOCODE_MESSAGE[result.failure ?? "no_result"],
+          });
+          continue;
+        }
       }
 
+      if (!point) continue;
       const { error: writeError } = await supabase.rpc("set_order_location", {
         p_order_id: order.id,
-        p_lat: result.point.lat,
-        p_lng: result.point.lng,
+        p_lat: point.lat,
+        p_lng: point.lng,
       });
 
       if (writeError) {
@@ -1023,7 +1111,7 @@ export async function geocodeOrders(ids: string[]): Promise<GeocodeBatchResult> 
         // The normalised address is shown back deliberately: a match that
         // silently landed on the wrong Station Road is only catchable by
         // reading what Google actually resolved to.
-        detail: `${result.formatted ?? "matched"}${result.matchedBy === "eircode" ? " · via Eircode" : ""}${result.partial ? " · partial match — check it" : ""}`,
+        detail,
       });
     }
 

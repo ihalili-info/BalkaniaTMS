@@ -141,11 +141,29 @@ CREATE TABLE notifications (
   UNIQUE (load_item_id, type)
 );
 
+-- 6. Geocode cache (migration 0012) — resolved delivery locations, reused
+-- across imports. Keyed on an Eircode (IE) or country:postcode:address line.
+-- A `manual` fix is human-verified and upsert_geocode_cache() refuses to let
+-- an automatic geocode overwrite it.
+CREATE TABLE geocode_cache (
+  key TEXT PRIMARY KEY,
+  location GEOGRAPHY(POINT, 4326) NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('manual','rooftop','interpolated','geometric_center')),
+  formatted_address TEXT,
+  verified_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  verified_at TIMESTAMPTZ,
+  hit_count INT NOT NULL DEFAULT 0,
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_used_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Spatial indexes for efficient proximity queries
 CREATE INDEX idx_trucks_location ON trucks USING GIST (current_location);
 CREATE INDEX idx_trucks_features ON trucks USING GIN (features);
 CREATE INDEX idx_trucks_assignable ON trucks (id) WHERE availability = 'available';
 CREATE INDEX idx_orders_location ON orders USING GIST (delivery_location);
+CREATE INDEX idx_geocode_cache_last_used ON geocode_cache (last_used_at) WHERE source <> 'manual';
 ```
 
 ### Truck ownership split

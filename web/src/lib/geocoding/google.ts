@@ -185,16 +185,23 @@ async function runGeocode(
 }
 
 /**
- * A well-formed Eircode: 3-char routing key + 4-char unique identifier,
- * returned in the canonical "D02 XY45" spacing. Uses the same shape check as
- * the rest of the app (`regions.ts`), so the two never drift apart.
+ * A well-formed Eircode, compacted and upper-cased ("D02XY45"), or null.
+ * Uses the same shape check as the rest of the app (`regions.ts`), so the two
+ * never drift apart. Shared with the geocode cache, which keys Irish addresses
+ * on it.
  */
-function normaliseEircode(postcode: string | null): string | null {
+export function compactEircode(postcode: string | null): string | null {
   if (!postcode) return null;
   const compact = postcode.replace(/\s+/g, "").toUpperCase();
   if (compact.length !== 7) return null;
   if (!country("IE").postcodePattern.test(compact)) return null;
-  return `${compact.slice(0, 3)} ${compact.slice(3)}`;
+  return compact;
+}
+
+/** The same Eircode in its canonical "D02 XY45" spacing, for a Google query. */
+function normaliseEircode(postcode: string | null): string | null {
+  const compact = compactEircode(postcode);
+  return compact ? `${compact.slice(0, 3)} ${compact.slice(3)}` : null;
 }
 
 /**

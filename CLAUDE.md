@@ -43,6 +43,10 @@ keep it and `supabase/migrations/` in sync.
   - `0007_sent_channels.sql` — widens `driver_messages.channel` to include RCS
   - `0008_production_reads.sql` — `orders.promised_at`, the `*_geo` views that
     expose lat/lng, and the analytics RPCs
+  - `0012_geocode_cache.sql` — `geocode_cache`: resolved delivery locations
+    reused across imports, keyed on Eircode (IE) or postcode + address line.
+    `manual` fixes outrank and are never overwritten by an automatic geocode
+    (`upsert_geocode_cache` enforces it). `geocode_cache_geo` exposes lat/lng.
 - `web/` — Next.js 16 (App Router, TypeScript, Tailwind v4) admin panel. See
   [web/README.md](web/README.md) for its layout and conventions.
   - `src/app/globals.css` — the entire design system as Tailwind v4 `@theme` tokens
@@ -275,9 +279,10 @@ diverging.
   country is an error. A malformed postcode or a phone without a country code is
   a warning — postal data is messy, and dropping the order is worse than
   importing it with a flag. Bad rows are skipped, never guessed at.
-- Imported orders have **no coordinates** unless the file supplies lat/lng, so
-  they queue for geocoding — the same rule the CRM path must follow: flag,
-  never drop.
+- Imported orders have **no coordinates** unless the file supplies lat/lng or
+  the address is a hit in the geocode cache (see that section); otherwise they
+  queue for geocoding — the same rule the CRM path must follow: flag, never
+  drop.
 
 When the webhook lands, keep the import: a manual path for one-off spreadsheets
 is worth having regardless.
@@ -509,6 +514,34 @@ well-formed Eircode it queries the **Eircode alone** before the address string
 — an Eircode is a single building, not a district, so it turns a hopeless rural
 address into a rooftop match. Falls through to the address-string query if the
 Eircode misses. `GeocodeOutcome.matchedBy` records which won.
+
+## Geocode cache
+
+`lib/geocoding/cache.ts` + migration 0012. Resolved delivery locations are
+saved and reused, so a re-imported address costs no Google lookup and a
+hand-placed rural address is never hand-placed twice. Fills three paths:
+`importOrders` (before an order queues for geocoding), `geocodeOrders` (in
+front of Google), and `fixOrderAddress` (writes a `manual` entry).
+
+- **The key is tight, because a cache hit is invisible.** Eircode for Ireland,
+  `country:postcode:normalised-address` elsewhere, and **nothing without one of
+  those** — a fuzzy address-string match is how a stale pin reaches a live
+  order. `geocodeCacheKey()` builds it; keep it in step with the SQL comment.
+- **`source` grades trust.** `manual` is reused directly and is **never**
+  overwritten by an automatic geocode (`upsert_geocode_cache` has the guard in
+  its `ON CONFLICT` clause). `rooftop` / `interpolated` are reused directly.
+  `geometric_center` is weak — `geocodeOrders` still tries a fresh geocode and
+  only falls back to the cached point if that fails.
+- **Never silent.** Every reuse shows "from a saved location / manual fix" on
+  the row, the same principle as showing Google's normalised address back.
+- **Retention.** It is customer personal data keyed by address — same posture
+  as `orders` / `notifications`. `last_used_at` (indexed, non-manual only) is
+  there for a staleness sweep; `manual` entries are real human knowledge and
+  are kept until the address itself is corrected.
+- **Not built:** an admin screen to inspect or prune it, and the staleness
+  sweep itself. `geocodeOrders` still hard-returns `not_configured` when
+  `GEOCODING_API_KEY` is unset, so cache-only geocoding from the UI does not
+  work yet (the import path already runs cache-only).
 
 ## Known gaps
 
