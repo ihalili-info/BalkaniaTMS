@@ -51,7 +51,9 @@ export const COUNTRIES: Record<CountryCode, Country> = {
     bloc: "eu",
     dialPrefix: "+353",
     postcodeLabel: "Eircode",
-    postcodePattern: /^[A-Z]\d{2}\s?[A-Z0-9]{4}$/i,
+    // Routing key is a letter then two chars that are digits or, for Dublin 6
+    // West, "W" ("D6W"). Space is optional and may be doubled in pasted data.
+    postcodePattern: /^[A-Z]\d[\dW]\s*[A-Z0-9]{4}$/i,
     postcodeExample: "D02 XY45",
     maxGrossWeightKg: 44_000,
     // No general height limit in law, but 4.65 m is the practical bridge
@@ -158,6 +160,41 @@ export function country(code: CountryCode): Country {
       bbox: [-90, -180, 90, 180],
     }
   );
+}
+
+/* --- postcodes ------------------------------------------------------------- */
+
+/**
+ * Countries whose postcode is a head plus a fixed-length tail, and that tail
+ * length. Everything else (numeric codes: FR, DE, BE) is a single run.
+ */
+const POSTCODE_TAIL: Record<string, number> = { IE: 4, GB: 3, XI: 3, NL: 2 };
+
+/**
+ * Canonical postcode form, for storage and display.
+ *
+ * People type Eircodes and UK postcodes with the space in a random place or
+ * missing entirely — `"N39HX56"`, `"n39 hx56"`, `"N39  HX56"` are one code.
+ * This collapses them to one representation so the Orders Queue does not show
+ * three spellings of the same place, and so the geocode cache keys them
+ * together.
+ *
+ * An unrecognised shape is trimmed and upper-cased but never dropped — a
+ * strange postcode is still worth more than none.
+ */
+export function normalisePostcode(
+  code: CountryCode,
+  raw: string | null | undefined,
+): string | null {
+  if (raw == null) return null;
+  const compact = raw.replace(/\s+/g, "").toUpperCase();
+  if (compact === "") return null;
+
+  const tail = POSTCODE_TAIL[code];
+  if (tail && compact.length > tail) {
+    return `${compact.slice(0, -tail)} ${compact.slice(-tail)}`;
+  }
+  return compact;
 }
 
 /* --- coordinate sanity ------------------------------------------------------ */
