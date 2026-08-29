@@ -98,9 +98,17 @@ export async function getGpsFeedHealth(): Promise<GpsFeedHealth> {
       trucksTotal === 0
         ? "Nothing has ever called this endpoint, and there are no trucks yet. Sync the fleet from Reveal, then have the endpoint registered."
         : "Nothing has ever called this endpoint. Verizon does not push until the URL and Basic-auth credentials are registered in Reveal (Admin → Integrations) — that request goes through your Reveal account manager.";
-  } else if ((totals.unauthorized ?? 0) > 0) {
+  } else if (
+    (totals.unauthorized ?? 0) > 0 &&
+    (totals.stored ?? 0) === 0 &&
+    !confirmed
+  ) {
+    // Only genuine mismatches reach the log now — the route no longer records
+    // SNS's expected credential-less probe. And if anything has ever stored or
+    // the subscription confirmed, the credentials are fine and something else
+    // is the problem.
     diagnosis =
-      "Verizon is calling but the credentials are being rejected. The username and password registered with them do not match GPS_WEBHOOK_USER / GPS_WEBHOOK_SECRET in Vercel.";
+      "Verizon is calling with credentials that do not match GPS_WEBHOOK_USER / GPS_WEBHOOK_SECRET in Vercel. Check both values against what was entered in the Reveal webhook form, then redeploy.";
   } else if (unmatchedNumbers.length > 0) {
     diagnosis = `Positions are arriving for Vehicle Numbers with no truck: ${unmatchedNumbers.join(", ")}. Sync the fleet from Reveal, or correct the GPS device field on those trucks.`;
   } else if ((totals.rejected ?? 0) > 0 && (totals.stored ?? 0) === 0) {

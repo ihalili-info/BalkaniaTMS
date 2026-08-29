@@ -124,19 +124,27 @@ export async function POST(request: Request) {
   }
 
   // Auth first, and the 401 is part of the protocol, not a rejection. AWS SNS
-  // (which is what carries this feed) sends the very first
-  // `SubscriptionConfirmation` with **no credentials**, expects
-  // `401 WWW-Authenticate: Basic`, then retries the same request *with*
-  // credentials — which Verizon holds from the endpoint submission form. So a
-  // bare 401 here is what activates the feed; it is not what burns the window.
+  // (which is what carries this feed) sends every message once with **no
+  // credentials**, expects `401 WWW-Authenticate: Basic`, then retries the same
+  // request *with* credentials — which Verizon holds from the endpoint
+  // submission form. So a bare 401 here is what activates the feed.
+  //
+  // Only a request that *carried* an Authorization header and still failed is a
+  // real credential mismatch worth logging. Logging the credential-less probe
+  // would make every healthy delivery look like an auth failure.
   if (!authorised(request)) {
-    await logDeliveries([
-      {
-        vehicle_number: null,
-        outcome: "unauthorized",
-        reason: "Basic auth missing or wrong — sent 401 challenge",
-      },
-    ]);
+    const carriedCredentials =
+      (request.headers.get("authorization") ?? "").trim() !== "";
+    if (carriedCredentials) {
+      await logDeliveries([
+        {
+          vehicle_number: null,
+          outcome: "unauthorized",
+          reason:
+            "Basic auth credentials did not match GPS_WEBHOOK_USER / GPS_WEBHOOK_SECRET",
+        },
+      ]);
+    }
     return unauthorized();
   }
 
