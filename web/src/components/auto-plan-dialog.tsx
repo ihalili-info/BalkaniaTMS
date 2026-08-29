@@ -31,6 +31,7 @@ import {
   type ProposedLoad,
 } from "@/lib/load-planner";
 import { HOME_COUNTRY, requiresCmr } from "@/lib/regions";
+import { GROUP_COLOURS, PlanMap, type PlanMapGroup } from "@/components/plan-map";
 import type { Order, RouteLeg, Truck } from "@/lib/types";
 
 /**
@@ -58,6 +59,7 @@ export function AutoPlanDialog({
   onClose: () => void;
 }) {
   const router = useRouter();
+  const [view, setView] = useState<"list" | "map">("list");
   const [options, setOptions] = useState<PlannerOptions>(DEFAULT_PLANNER_OPTIONS);
   const [geocodeLines, setGeocodeLines] = useState<GeocodeLine[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -141,6 +143,17 @@ export function AutoPlanDialog({
   const kept = plan.loads
     .map((load, index) => ({ load, index }))
     .filter(({ index }) => !dropped.has(index));
+
+  const mapGroups: PlanMapGroup[] = plan.loads.map((load, index) => ({
+    index,
+    colour: GROUP_COLOURS[index % GROUP_COLOURS.length],
+    dropped: dropped.has(index),
+    stops: load.stops.map((s) => ({
+      lat: s.delivery_location!.lat,
+      lng: s.delivery_location!.lng,
+      name: s.customer_name,
+    })),
+  }));
 
   const truckFor = (load: ProposedLoad, index: number) =>
     overrides[index] ?? load.truck?.id ?? "";
@@ -377,10 +390,48 @@ export function AutoPlanDialog({
           </p>
 
           {/* --- step 3: the proposal ------------------------------------- */}
+          {plan.loads.length > 0 ? (
+            <div
+              role="tablist"
+              aria-label="Proposal view"
+              className="mb-3 flex gap-1 border-b border-hairline"
+            >
+              {(["list", "map"] as const).map((v) => (
+                <button
+                  key={v}
+                  role="tab"
+                  aria-selected={view === v}
+                  onClick={() => setView(v)}
+                  className={cx(
+                    "-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-body-sm transition-colors",
+                    view === v
+                      ? "border-brand font-medium text-ink"
+                      : "border-transparent text-ink-muted hover:text-ink",
+                  )}
+                >
+                  <Icon
+                    name={v === "list" ? "list" : "map"}
+                    filled={view === v}
+                    className={cx("text-[17px]", view === v && "text-brand")}
+                  />
+                  {v === "list" ? "Groups" : "Map"}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
           {plan.loads.length === 0 ? (
             <p className="rounded-sm border border-dashed border-hairline-strong px-3 py-8 text-center text-caption text-ink-subtle">
               Nothing to group yet. Orders need coordinates first.
             </p>
+          ) : view === "map" ? (
+            <>
+              <PlanMap depot={{ lat: DEPOT.lat, lng: DEPOT.lng }} groups={mapGroups} />
+              <p className="mt-2 text-caption text-ink-subtle">
+                Straight lines from the depot through each group&rsquo;s stops
+                and back. Uncheck a group in the list to drop it — it dims here.
+              </p>
+            </>
           ) : (
             <ul className="space-y-3">
               {plan.loads.map((load, index) => {

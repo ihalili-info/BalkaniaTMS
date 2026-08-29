@@ -418,7 +418,10 @@ most of the mainland 4.00 m — so a legal Irish trailer can be illegal in Franc
 
 **Auto-plan** in the Orders Queue selection bar: geocode → group by geography →
 review → create. `lib/load-planner.ts` is the whole algorithm and it is pure —
-no I/O, no clock — so it can be reasoned about and run standalone.
+no I/O, no clock — so it can be reasoned about and run standalone. The review
+step has two views (`components/plan-map.tsx`): a **Groups** list and a **Map** —
+a dependency-free SVG schematic drawing depot → each group's stops → depot, one
+colour per group, dropped groups dimmed. Straight lines, same as the planner.
 
 - **Roads when routing is configured, straight lines otherwise.** With
   `ROUTING_API_KEY` set, sequencing, `routeMeters` and `routeSeconds` run on

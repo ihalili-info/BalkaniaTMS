@@ -51,6 +51,7 @@ export type RoutingFailure =
   | "no_route"
   | "quota"
   | "denied"
+  | "invalid_request"
   | "network"
   | "bad_response";
 
@@ -60,7 +61,9 @@ export const ROUTING_MESSAGE: Record<RoutingFailure, string> = {
   no_route: "Google could not find a road route between these points.",
   quota: "Google's Routes quota or rate limit was hit. Falling back to straight-line distance.",
   denied:
-    "Google refused the Routes request — usually the key is not enabled for the Routes API, or is referrer-restricted. A server-side key must have no referrer restriction.",
+    "Google refused the Routes request — the key is not enabled for the Routes API, or is referrer-restricted. A server-side key must have no referrer restriction.",
+  invalid_request:
+    "Google rejected the Routes request (HTTP 400). Check that the Routes API is enabled on the key's project; see the server log for the exact reason.",
   network: "Could not reach Google Routes.",
   bad_response: "Google Routes returned something unparseable.",
 };
@@ -92,9 +95,21 @@ function parseDuration(value: unknown): number | null {
   return Number.isFinite(n) ? Math.round(n) : null;
 }
 
-function classifyHttp(status: number): RoutingFailure {
-  if (status === 429) return "quota";
-  if (status === 403 || status === 401) return "denied";
+/**
+ * Turns a failed HTTP response into a `RoutingFailure`, logging the body so the
+ * exact Google error (which never reaches the UI) is in the server log.
+ */
+async function classifyHttp(
+  endpoint: string,
+  response: Response,
+): Promise<RoutingFailure> {
+  const body = await response.text().catch(() => "");
+  console.error(
+    `[routing] ${endpoint} → ${response.status} ${response.statusText}: ${body.slice(0, 500)}`,
+  );
+  if (response.status === 429) return "quota";
+  if (response.status === 403 || response.status === 401) return "denied";
+  if (response.status === 400) return "invalid_request";
   return "bad_response";
 }
 
@@ -143,7 +158,7 @@ export async function routeLeg(
   }
 
   if (!response.ok) {
-    return { leg: null, failure: classifyHttp(response.status) };
+    return { leg: null, failure: await classifyHttp("computeRoutes", response) };
   }
 
   let payload: { routes?: { distanceMeters?: number; duration?: string }[] };
@@ -225,11 +240,13 @@ export async function routeMatrix(
             "originIndex,destinationIndex,distanceMeters,duration,condition,status",
         },
         body: JSON.stringify({
+          // computeRouteMatrix takes no top-level routeModifiers — that field
+          // lives inside each origin. Ferries are allowed by default, which is
+          // what this fleet wants, so nothing extra is needed.
           origins: block.map(point),
           destinations: destinations.map(point),
           travelMode: "DRIVE",
           routingPreference: "TRAFFIC_UNAWARE",
-          routeModifiers: { avoidFerries: false },
         }),
         cache: "no-store",
       });
@@ -238,7 +255,7 @@ export async function routeMatrix(
     }
 
     if (!response.ok) {
-      return { matrix, failure: classifyHttp(response.status) };
+      return { matrix, failure: await classifyHttp("computeRouteMatrix", response) };
     }
 
     let elements: MatrixElement[];
