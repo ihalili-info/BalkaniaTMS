@@ -232,39 +232,39 @@ export async function POST(request: Request) {
   }
 
   const supabase = createServiceClient();
+
+  // Small fleet: pull the identity columns once and match in memory. Reveal
+  // shows a Vehicle Number as "232 D 26017" but the push can send "232D26017",
+  // so the match ignores spaces and punctuation; doing it in JS also removes
+  // any filter-string injection concern from the (authenticated) payload.
+  const { data: fleet, error: fleetError } = await supabase
+    .from("trucks")
+    .select("id, gps_device_id, gps_esn, gps_sequence_id, location_updated_at");
+  if (fleetError) {
+    return Response.json({ error: fleetError.message }, { status: 500 });
+  }
+
+  /** "232 D 26017" / "232-D-26017" / "232D26017" all collapse to one key. */
+  const key = (v: string | null | undefined) =>
+    (v ?? "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+
   let stored = 0;
   const skipped: string[] = [];
 
   for (const fix of accepted) {
-    // Reveal identifiers are alphanumeric; strip anything else before it goes
-    // into a PostgREST filter string (the payload is attacker-influenceable
-    // once the webhook password is known).
-    const clean = (v: string | null) => v?.replace(/[^A-Za-z0-9_-]/g, "") || null;
-    const vehicleNumber = clean(fix.vehicleNumber);
-    const esn = clean(fix.esn);
-    const label = vehicleNumber ?? esn ?? "unknown";
+    const label = fix.vehicleNumber ?? fix.esn ?? "unknown";
+    const wantNumber = key(fix.vehicleNumber);
+    const wantEsn = key(fix.esn);
 
     // Match on Vehicle Number (`gps_device_id`), then fall back to ESN
     // (`gps_esn`, migration 0013) — the doc's "mandatory" identifier, and the
     // only one present when a vehicle has no Number set in Reveal.
-    const or: string[] = [];
-    if (vehicleNumber) or.push(`gps_device_id.eq.${vehicleNumber}`);
-    if (esn) or.push(`gps_esn.eq.${esn}`);
-    if (or.length === 0) {
-      skipped.push(`${label}: no usable identifier`);
-      continue;
-    }
+    const truck = (fleet ?? []).find(
+      (t) =>
+        (wantNumber !== "" && key(t.gps_device_id) === wantNumber) ||
+        (wantEsn !== "" && t.gps_esn != null && key(t.gps_esn) === wantEsn),
+    );
 
-    const { data: trucks, error } = await supabase
-      .from("trucks")
-      .select("id, gps_sequence_id, location_updated_at")
-      .or(or.join(","))
-      .limit(1);
-
-    if (error) {
-      return Response.json({ error: error.message }, { status: 500 });
-    }
-    const truck = trucks?.[0];
     if (!truck) {
       // A vehicle in Reveal that is not in our fleet is not an error — it is a
       // truck someone has not added yet, or one whose Vehicle Number / ESN is
@@ -310,6 +310,10 @@ export async function POST(request: Request) {
     if (updateError) {
       return Response.json({ error: updateError.message }, { status: 500 });
     }
+    // Keep the in-memory row current so a second fix for the same truck later
+    // in this batch is compared against what we just wrote, not the stale value.
+    truck.gps_sequence_id = fix.sequenceId;
+    truck.location_updated_at = fix.recordedAt;
     stored += 1;
     log.push({
       vehicle_number: label,
