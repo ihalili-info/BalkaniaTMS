@@ -162,7 +162,7 @@ export function GoogleCanvas({
       new maps.Marker({
         map,
         position: { lat: DEPOT.lat, lng: DEPOT.lng },
-        title: "Ballymount depot",
+        title: DEPOT.label,
         zIndex: 10,
         icon: {
           path: "M -7 -7 H 7 V 7 H -7 Z",

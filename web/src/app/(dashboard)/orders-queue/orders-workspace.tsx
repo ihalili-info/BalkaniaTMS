@@ -24,6 +24,7 @@ export function OrdersWorkspace({
   trucks,
   loadRefByOrderId,
   geocodingReady,
+  mapsKey,
 }: {
   initialOrders: Order[];
   /** Needed by Auto-plan, which suggests a truck per group. */
@@ -31,6 +32,8 @@ export function OrdersWorkspace({
   loadRefByOrderId: Record<string, string>;
   /** Whether GEOCODING_API_KEY is set, so the UI can say so rather than fail. */
   geocodingReady: boolean;
+  /** Google Maps browser key, for Auto-plan's map view. */
+  mapsKey: string | null;
 }) {
   // One clock for the render, so relative times inside it agree.
   const [now] = useState(() => new Date());
@@ -281,6 +284,7 @@ export function OrdersWorkspace({
         loadRefByOrderId={loadRefByOrderId}
         importedIds={importedIds}
         geocodingReady={geocodingReady}
+        mapsKey={mapsKey}
         onFixAddress={(id) => setFixing({ startWith: id })}
         onOrdersDeleted={handleOrdersDeleted}
       />

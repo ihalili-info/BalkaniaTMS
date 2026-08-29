@@ -31,8 +31,12 @@ import {
   type ProposedLoad,
 } from "@/lib/load-planner";
 import { HOME_COUNTRY, requiresCmr } from "@/lib/regions";
-import { GROUP_COLOURS, PlanMap, type PlanMapGroup } from "@/components/plan-map";
-import type { Order, RouteLeg, Truck } from "@/lib/types";
+import { PlanMap, groupColour, type PlanMapGroup } from "@/components/plan-map";
+import { PlanGoogleMap } from "@/components/plan-google-map";
+import type { LatLng, Order, RouteLeg, Truck } from "@/lib/types";
+
+/** Stable reference so map effects do not redraw on every render. */
+const DEPOT_LATLNG: LatLng = { lat: DEPOT.lat, lng: DEPOT.lng };
 
 /**
  * Auto-plan: geocode, then group by geography, then review.
@@ -48,6 +52,7 @@ export function AutoPlanDialog({
   trucks,
   loadRefByOrderId,
   geocodingReady,
+  mapsKey = null,
   onClose,
 }: {
   /** The selected orders. */
@@ -56,6 +61,8 @@ export function AutoPlanDialog({
   loadRefByOrderId: Record<string, string>;
   /** Whether GEOCODING_API_KEY is set — the button is honest about it if not. */
   geocodingReady: boolean;
+  /** Google Maps browser key. Absent → the schematic map. */
+  mapsKey?: string | null;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -131,7 +138,7 @@ export function AutoPlanDialog({
       planLoads({
         orders,
         trucks,
-        depot: { lat: DEPOT.lat, lng: DEPOT.lng },
+        depot: DEPOT_LATLNG,
         originCountry: HOME_COUNTRY,
         onLoadOrderIds: onLoad,
         options,
@@ -146,7 +153,7 @@ export function AutoPlanDialog({
 
   const mapGroups: PlanMapGroup[] = plan.loads.map((load, index) => ({
     index,
-    colour: GROUP_COLOURS[index % GROUP_COLOURS.length],
+    colour: groupColour(index),
     dropped: dropped.has(index),
     stops: load.stops.map((s) => ({
       lat: s.delivery_location!.lat,
@@ -426,10 +433,22 @@ export function AutoPlanDialog({
             </p>
           ) : view === "map" ? (
             <>
-              <PlanMap depot={{ lat: DEPOT.lat, lng: DEPOT.lng }} groups={mapGroups} />
+              {mapsKey ? (
+                <PlanGoogleMap
+                  apiKey={mapsKey}
+                  depot={DEPOT_LATLNG}
+                  groups={mapGroups}
+                />
+              ) : (
+                <PlanMap
+                  depot={DEPOT_LATLNG}
+                  groups={mapGroups}
+                />
+              )}
               <p className="mt-2 text-caption text-ink-subtle">
                 Straight lines from the depot through each group&rsquo;s stops
-                and back. Uncheck a group in the list to drop it — it dims here.
+                and back — the geometry the planner sequenced on, not a road
+                route. Uncheck a group in the list to drop it; it dims here.
               </p>
             </>
           ) : (

@@ -47,6 +47,7 @@ import {
 import { CUSTOMS_REGIME } from "@/lib/regions";
 
 import { geocodingConfigured } from "@/lib/geocoding/google";
+import { googleMapsKey } from "@/lib/maps.server";
 
 import { DispatchActions } from "./dispatch-actions";
 import { LoadMenu } from "./load-menu";
@@ -403,6 +404,7 @@ export default async function ActiveLoadsPage() {
             drivers={drivers}
             unassignedOrders={unassignedOrders}
             geocodingReady={geocodingConfigured()}
+            mapsKey={googleMapsKey()}
           />
         }
       />

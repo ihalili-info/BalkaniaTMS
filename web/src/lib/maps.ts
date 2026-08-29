@@ -23,7 +23,7 @@
  * which is still to scale — it just has no road network.
  */
 
-/** Where the map opens before it has anything to fit — the Ballymount depot. */
+/** Where the map opens before it has anything to fit — the Dublin 11 depot. */
 export const MAP_DEFAULT_ZOOM = 7;
 
 let pending: Promise<typeof google.maps> | null = null;

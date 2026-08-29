@@ -41,6 +41,7 @@ export function OrdersTable({
   loadRefByOrderId,
   importedIds,
   geocodingReady,
+  mapsKey = null,
   onFixAddress,
   onOrdersDeleted,
 }: {
@@ -49,6 +50,8 @@ export function OrdersTable({
   loadRefByOrderId: Record<string, string>;
   /** GEOCODING_API_KEY present — Auto-plan says so rather than failing late. */
   geocodingReady: boolean;
+  /** Google Maps browser key, for Auto-plan's map view. */
+  mapsKey?: string | null;
   /** Ids added by CSV import this session — marked so they are traceable. */
   importedIds?: Set<string>;
   onFixAddress?: (orderId: string) => void;
@@ -175,6 +178,7 @@ export function OrdersTable({
           trucks={trucks}
           loadRefByOrderId={loadRefByOrderId}
           geocodingReady={geocodingReady}
+          mapsKey={mapsKey}
           onClose={() => {
             setPlanning(false);
             setSelected([]);

@@ -16,12 +16,15 @@ export function DispatchActions({
   drivers,
   unassignedOrders,
   geocodingReady,
+  mapsKey = null,
 }: {
   trucks: Truck[];
   drivers: Driver[];
   unassignedOrders: Order[];
   /** GEOCODING_API_KEY present — Auto-plan says so rather than failing late. */
   geocodingReady: boolean;
+  /** Google Maps browser key, for Auto-plan's map view. */
+  mapsKey?: string | null;
 }) {
   const [planning, setPlanning] = useState(false);
   const [autoPlanning, setAutoPlanning] = useState(false);
@@ -55,6 +58,7 @@ export function DispatchActions({
           // Unassigned by definition, so nothing here is on a load already.
           loadRefByOrderId={{}}
           geocodingReady={geocodingReady}
+          mapsKey={mapsKey}
           onClose={() => setAutoPlanning(false)}
         />
       ) : null}

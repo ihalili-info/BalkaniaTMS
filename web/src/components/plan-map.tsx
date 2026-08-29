@@ -16,25 +16,34 @@ import type { LatLng } from "@/lib/types";
  * no basemap — the grey city labels are the only orientation.
  */
 
+export interface GroupColour {
+  /** CSS custom-property name, for SVG. */
+  token: string;
+  /** Resolved hex, for Google Maps overlays (which take strings, not vars). */
+  hex: string;
+}
+
 export interface PlanMapGroup {
   index: number;
-  /** A CSS colour, e.g. `var(--color-viz-1)`. */
-  colour: string;
+  colour: GroupColour;
   /** Dimmed and dashed when the dispatcher has unchecked the group. */
   dropped: boolean;
   stops: { lat: number; lng: number; name: string }[];
 }
 
 /** Distinct enough at a glance, and all on the design system. */
-export const GROUP_COLOURS = [
-  "var(--color-viz-1)",
-  "var(--color-viz-2)",
-  "var(--color-viz-3)",
-  "var(--color-accent)",
-  "var(--color-ok)",
-  "var(--color-danger)",
-  "var(--color-warn)",
+export const GROUP_PALETTE: GroupColour[] = [
+  { token: "--color-viz-1", hex: "#2f5bd7" },
+  { token: "--color-viz-2", hex: "#c2701c" },
+  { token: "--color-viz-3", hex: "#0f9488" },
+  { token: "--color-accent", hex: "#7c0fe8" },
+  { token: "--color-ok", hex: "#12855a" },
+  { token: "--color-danger", hex: "#c33227" },
+  { token: "--color-warn", hex: "#a76400" },
 ];
+
+export const groupColour = (index: number): GroupColour =>
+  GROUP_PALETTE[index % GROUP_PALETTE.length];
 
 const KM_PER_DEG_LAT = 110.574;
 const kmPerDegLng = (lat: number) => 111.32 * Math.cos((lat * Math.PI) / 180);
@@ -196,12 +205,13 @@ export function PlanMap({
               view.depotXY,
             ];
             const d = seq.map((p) => `${p.x},${p.y}`).join(" ");
+            const stroke = `var(${g.colour.token})`;
             return (
               <g key={g.index} opacity={g.dropped ? 0.28 : 1}>
                 <polyline
                   points={d}
                   fill="none"
-                  stroke={g.colour}
+                  stroke={stroke}
                   strokeWidth={u * (g.dropped ? 0.5 : 0.8)}
                   strokeDasharray={g.dropped ? `${u * 1.5} ${u * 1.5}` : undefined}
                   strokeLinejoin="round"
@@ -210,7 +220,7 @@ export function PlanMap({
                   const p = view.project({ lat: s.lat, lng: s.lng });
                   return (
                     <g key={i}>
-                      <circle cx={p.x} cy={p.y} r={u * 1.7} fill={g.colour} />
+                      <circle cx={p.x} cy={p.y} r={u * 1.7} fill={stroke} />
                       <text
                         x={p.x}
                         y={p.y}
@@ -260,7 +270,7 @@ export function PlanMap({
           >
             <span
               className="inline-block size-2.5 rounded-full"
-              style={{ background: g.colour }}
+              style={{ background: `var(${g.colour.token})` }}
             />
             <span className="text-ink">Group {g.index + 1}</span>
             <span className="text-ink-subtle">

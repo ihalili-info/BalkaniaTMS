@@ -25,10 +25,15 @@ export interface ReferencePlace {
  */
 export const DEPOT: ReferencePlace & { label: string } = {
   name: "Depot",
-  label: "Ballymount Terminal, Dublin 12",
+  label:
+    "Sanguine House, Huntstown Business Park, Cappagh Road, Dublin 11, D11 T9TF",
   country: "IE",
-  lat: 53.3195,
-  lng: -6.352,
+  // Centroid of Huntstown Business Park, Ballycoolin (OpenStreetMap). Within
+  // ~150 m of the unit; fine as a map anchor and route origin — the depot is
+  // never a delivery stop, so geofence precision does not apply. Re-geocode
+  // "D11 T9TF" if a rooftop point is ever needed.
+  lat: 53.403717,
+  lng: -6.342258,
 };
 
 /** Places worth labelling on the operating area. */

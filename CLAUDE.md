@@ -4,8 +4,10 @@ Smart logistics dispatch platform: syncs orders from a CRM, tracks trucks via
 GPS/telematics, geofences delivery stops, and sends automated SMS/WhatsApp
 customer alerts via Sent (sent.dm).
 
-**The operation is Ireland-based** — Dublin (Ballymount) depot — running
-domestic work plus cross-border into Northern Ireland, Great Britain and
+**The operation is Ireland-based** — the depot is Sanguine House, Huntstown
+Business Park, Cappagh Road, Dublin 11 (D11 T9TF), set in
+`lib/geo/reference.ts` — running domestic work plus cross-border into Northern
+Ireland, Great Britain and
 mainland Europe, and expanding further into the EU and UK. Nothing hard-codes
 Ireland: country is a column and a row in `web/src/lib/regions.ts`.
 
@@ -419,9 +421,12 @@ most of the mainland 4.00 m — so a legal Irish trailer can be illegal in Franc
 **Auto-plan** in the Orders Queue selection bar: geocode → group by geography →
 review → create. `lib/load-planner.ts` is the whole algorithm and it is pure —
 no I/O, no clock — so it can be reasoned about and run standalone. The review
-step has two views (`components/plan-map.tsx`): a **Groups** list and a **Map** —
-a dependency-free SVG schematic drawing depot → each group's stops → depot, one
-colour per group, dropped groups dimmed. Straight lines, same as the planner.
+step has two views: a **Groups** list and a **Map** — depot → each group's
+stops → depot, one colour per group, dropped groups dimmed. With a Maps browser
+key the Map is the Google basemap (`components/plan-google-map.tsx`); without
+one it falls back to a dependency-free SVG schematic (`components/plan-map.tsx`).
+Either way the connectors are **straight lines** — the geometry the planner
+sequenced on, not a routed path.
 
 - **Roads when routing is configured, straight lines otherwise.** With
   `ROUTING_API_KEY` set, sequencing, `routeMeters` and `routeSeconds` run on

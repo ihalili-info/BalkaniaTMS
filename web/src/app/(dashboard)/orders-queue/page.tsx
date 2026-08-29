@@ -8,6 +8,7 @@ import {
   loadRefByOrderId,
 } from "@/lib/data/fleet";
 import { geocodingConfigured } from "@/lib/geocoding/google";
+import { googleMapsKey } from "@/lib/maps.server";
 
 import { OrdersWorkspace } from "./orders-workspace";
 
@@ -34,6 +35,7 @@ export default async function OrdersQueuePage() {
         trucks={trucks}
         loadRefByOrderId={loadRefByOrderId(loads)}
         geocodingReady={geocodingConfigured()}
+        mapsKey={googleMapsKey()}
       />
     </Page>
   );
