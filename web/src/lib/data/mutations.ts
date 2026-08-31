@@ -706,6 +706,200 @@ export async function unstartLoad(loadId: string): Promise<WriteResult> {
   }
 }
 
+/**
+ * Marks one stop delivered — the manual counterpart to the geofence engine.
+ *
+ * The architecture doc has `load_items.delivered_at` set by the geofencing
+ * engine (arrival, dwell, departure), which also fires the customer's
+ * delivery-complete alert. That engine is unbuilt, so nothing finishes a load
+ * today. Until it lands a dispatcher records the drop here when the driver
+ * confirms it; afterwards the button stays as the override for a GPS gap or a
+ * phoned-in delivery.
+ *
+ * Cascades the two status columns the doc ties to this event: `orders.status`
+ * → `delivered`, and `loads.status` → `completed` once every stop on the load
+ * is delivered. It deliberately does **not** send the customer alert — that is
+ * the alert engine's job, guarded by `UNIQUE (load_item_id, type)`.
+ */
+export async function markStopDelivered(
+  loadItemId: string,
+): Promise<WriteResult> {
+  try {
+    await requireSession();
+    const supabase = await createClient();
+
+    const { data: item, error: itemError } = await supabase
+      .from("load_items")
+      .select("id, load_id, order_id, delivered_at")
+      .eq("id", loadItemId)
+      .maybeSingle();
+    if (itemError) return { ok: false, message: itemError.message };
+    if (!item) return { ok: false, message: "That stop no longer exists." };
+    if (item.delivered_at !== null) return { ok: true, message: null };
+
+    const { data: load, error: loadError } = await supabase
+      .from("loads")
+      .select("status")
+      .eq("id", item.load_id)
+      .maybeSingle();
+    if (loadError) return { ok: false, message: loadError.message };
+    if (load?.status !== "active") {
+      return {
+        ok: false,
+        message:
+          "Start the load first — a stop can only be delivered once the truck is on the road.",
+      };
+    }
+
+    const deliveredAt = new Date().toISOString();
+    const { error: stopError } = await supabase
+      .from("load_items")
+      .update({ delivered_at: deliveredAt })
+      .eq("id", loadItemId)
+      .is("delivered_at", null);
+    if (stopError) return { ok: false, message: stopError.message };
+
+    await supabase
+      .from("orders")
+      .update({ status: "delivered", updated_at: deliveredAt })
+      .eq("id", item.order_id);
+
+    // Every stop delivered → the load is done.
+    const { data: siblings, error: sibError } = await supabase
+      .from("load_items")
+      .select("delivered_at")
+      .eq("load_id", item.load_id);
+    if (sibError) return { ok: false, message: sibError.message };
+
+    const allDelivered =
+      (siblings ?? []).length > 0 &&
+      (siblings ?? []).every((s) => s.delivered_at !== null);
+    if (allDelivered) {
+      await supabase
+        .from("loads")
+        .update({ status: "completed" })
+        .eq("id", item.load_id)
+        .eq("status", "active");
+    }
+
+    revalidatePath("/active-loads");
+    revalidatePath("/orders-queue");
+    revalidatePath("/live-fleet-map");
+    revalidatePath("/");
+    return {
+      ok: true,
+      message: allDelivered ? "Load complete — every stop delivered." : null,
+    };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+}
+
+/**
+ * Reverses `markStopDelivered`.
+ *
+ * The escape hatch for the wrong stop, or one marked delivered early. Refused
+ * once the customer's delivery-complete alert has gone out for that stop — past
+ * that point un-delivering it would contradict a message the customer has
+ * already received, the same threshold `unstartLoad` and `deleteLoad` use.
+ *
+ * Reopens the load if delivering this stop is what completed it — unless the
+ * truck or driver has since been given another active load, the clash
+ * `startLoad` exists to prevent. In that case the stop is still un-delivered
+ * but the load stays `completed`, and the result says so.
+ */
+export async function undeliverStop(loadItemId: string): Promise<WriteResult> {
+  try {
+    await requireSession();
+    const supabase = await createClient();
+
+    const { data: item, error: itemError } = await supabase
+      .from("load_items")
+      .select("id, load_id, order_id, delivered_at")
+      .eq("id", loadItemId)
+      .maybeSingle();
+    if (itemError) return { ok: false, message: itemError.message };
+    if (!item) return { ok: false, message: "That stop no longer exists." };
+    if (item.delivered_at === null) return { ok: true, message: null };
+
+    const { count, error: notifError } = await supabase
+      .from("notifications")
+      .select("id", { count: "exact", head: true })
+      .eq("load_item_id", loadItemId)
+      .eq("type", "delivery_complete");
+    if (notifError) return { ok: false, message: notifError.message };
+    if ((count ?? 0) > 0) {
+      return {
+        ok: false,
+        message:
+          "The delivery-complete alert has already been sent for this stop — it can't be un-delivered.",
+      };
+    }
+
+    const { data: load, error: loadError } = await supabase
+      .from("loads")
+      .select("id, status, truck_id, driver_id")
+      .eq("id", item.load_id)
+      .maybeSingle();
+    if (loadError) return { ok: false, message: loadError.message };
+
+    // Decide whether the load can reopen *before* touching anything, so a
+    // blocked reopen still leaves a consistent state rather than a half-write.
+    let reopenBlocked = false;
+    if (load?.status === "completed") {
+      for (const [col, value] of [
+        ["truck_id", load.truck_id],
+        ["driver_id", load.driver_id],
+      ] as const) {
+        if (!value) continue;
+        const { data: clash, error: clashError } = await supabase
+          .from("loads")
+          .select("id")
+          .eq(col, value)
+          .eq("status", "active")
+          .neq("id", load.id)
+          .limit(1);
+        if (clashError) return { ok: false, message: clashError.message };
+        if (clash && clash.length > 0) reopenBlocked = true;
+      }
+    }
+
+    const now = new Date().toISOString();
+    const { error: stopError } = await supabase
+      .from("load_items")
+      .update({ delivered_at: null })
+      .eq("id", loadItemId);
+    if (stopError) return { ok: false, message: stopError.message };
+
+    // The load is active again — `startLoad` put its orders at `en_route`.
+    await supabase
+      .from("orders")
+      .update({ status: "en_route", updated_at: now })
+      .eq("id", item.order_id);
+
+    if (load?.status === "completed" && !reopenBlocked) {
+      await supabase
+        .from("loads")
+        .update({ status: "active" })
+        .eq("id", load.id)
+        .eq("status", "completed");
+    }
+
+    revalidatePath("/active-loads");
+    revalidatePath("/orders-queue");
+    revalidatePath("/live-fleet-map");
+    revalidatePath("/");
+    return {
+      ok: true,
+      message: reopenBlocked
+        ? "Stop un-delivered, but the load stays marked complete — its truck or driver is already running another active load. Edit the load to reassign it."
+        : null,
+    };
+  } catch (e) {
+    return { ok: false, message: (e as Error).message };
+  }
+}
+
 /* --- editing and removing a load --------------------------------------------- */
 
 export interface EditLoadInput {

@@ -309,6 +309,7 @@ export {
   APPROACH_ETA_MINUTES,
   activeOf,
   plannedOf,
+  recentlyCompletedOf,
   loadRefByOrderId,
   loadForTruck,
   loadForDriver,

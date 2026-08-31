@@ -21,6 +21,29 @@ export function plannedOf(loads: LoadView[]): LoadView[] {
   return loads.filter((l) => l.status === "planned");
 }
 
+/**
+ * Loads finished within `sinceMs` of now, newest drop first.
+ *
+ * A completed load leaves the active board, but the dispatcher still needs a
+ * short window to see what wrapped up — and to undo a stop marked delivered by
+ * mistake, which would otherwise be unreachable once the card disappears.
+ */
+export function recentlyCompletedOf(
+  loads: LoadView[],
+  now: Date,
+  sinceMs = 24 * 60 * 60 * 1000,
+): LoadView[] {
+  const cutoff = now.getTime() - sinceMs;
+  const lastDrop = (l: LoadView) =>
+    l.stops.reduce(
+      (t, s) => Math.max(t, s.delivered_at ? Date.parse(s.delivered_at) : 0),
+      0,
+    );
+  return loads
+    .filter((l) => l.status === "completed" && lastDrop(l) >= cutoff)
+    .sort((a, b) => lastDrop(b) - lastDrop(a));
+}
+
 export function loadRefByOrderId(loads: LoadView[]): Record<string, string> {
   return Object.fromEntries(
     loads.flatMap((l) => l.stops.map((s) => [s.order_id, l.reference])),

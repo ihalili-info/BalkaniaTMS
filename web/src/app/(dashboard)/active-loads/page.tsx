@@ -29,6 +29,7 @@ import {
   isApproaching,
   loadProgress,
   plannedOf,
+  recentlyCompletedOf,
   stopEtaMinutes,
   stopsInGeofence,
 } from "@/lib/data/fleet";
@@ -52,6 +53,7 @@ import { googleMapsKey } from "@/lib/maps.server";
 import { DispatchActions } from "./dispatch-actions";
 import { LoadMenu } from "./load-menu";
 import { StartLoadButton } from "./start-load";
+import { MarkDeliveredButton, UndeliverButton } from "./stop-delivery";
 import { RouteActions, StopNavMenu } from "./route-actions";
 import type { Driver, LatLng, LoadView, Order, Stop, Truck } from "@/lib/types";
 
@@ -63,6 +65,7 @@ function StopRow({
   stop,
   isNext,
   isLast,
+  loadActive,
   hoursWarning,
   origin,
   now,
@@ -70,6 +73,8 @@ function StopRow({
   stop: Stop;
   isNext: boolean;
   isLast: boolean;
+  /** The load is on the road — enables the manual delivered / undo controls. */
+  loadActive: boolean;
   /** Set when Reg. 561/2006 says the driver cannot legally reach this stop. */
   hoursWarning?: string | null;
   /** Truck position, so a single-stop link starts from where it actually is. */
@@ -160,40 +165,48 @@ function StopRow({
         ) : null}
       </div>
 
-      <div className="flex shrink-0 items-center gap-2">
-        <div className="text-right">
-        {delivered ? (
-          <>
-            <p className="text-body-sm text-ok">Delivered</p>
-            <p className="text-caption text-ink-subtle">
-              {relativeTime(stop.delivered_at!, now)}
-            </p>
-          </>
-        ) : (
-          <>
-            <p className="font-mono text-data-sm tabular text-ink">
-              {formatDistance(stop.distance_m)}
-            </p>
-            <p
-              className="text-caption text-ink-subtle"
-              title={
-                routed
-                  ? "Road drive-time from the truck's current position (Google Routes, live traffic)"
-                  : "Straight-line estimate at 45 km/h — a display stand-in, not alert-grade"
-              }
-            >
-              {eta === null
-                ? "no fix"
-                : routed
-                  ? `${eta} min by road`
-                  : `~${eta} min`}
-            </p>
-          </>
-        )}
+      <div className="flex shrink-0 flex-col items-end gap-1.5">
+        <div className="flex items-center gap-2">
+          <div className="text-right">
+          {delivered ? (
+            <>
+              <p className="text-body-sm text-ok">Delivered</p>
+              <p className="text-caption text-ink-subtle">
+                {relativeTime(stop.delivered_at!, now)}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="font-mono text-data-sm tabular text-ink">
+                {formatDistance(stop.distance_m)}
+              </p>
+              <p
+                className="text-caption text-ink-subtle"
+                title={
+                  routed
+                    ? "Road drive-time from the truck's current position (Google Routes, live traffic)"
+                    : "Straight-line estimate at 45 km/h — a display stand-in, not alert-grade"
+                }
+              >
+                {eta === null
+                  ? "no fix"
+                  : routed
+                    ? `${eta} min by road`
+                    : `~${eta} min`}
+              </p>
+            </>
+          )}
+          </div>
+          {delivered ? null : (
+            <StopNavMenu links={navLinks} label={stop.order.customer_name} />
+          )}
         </div>
-        {delivered ? null : (
-          <StopNavMenu links={navLinks} label={stop.order.customer_name} />
-        )}
+        {loadActive && delivered && !stop.notifications.includes("delivery_complete") ? (
+          <UndeliverButton loadItemId={stop.id} />
+        ) : null}
+        {loadActive && !delivered && isNext ? (
+          <MarkDeliveredButton loadItemId={stop.id} />
+        ) : null}
       </div>
     </li>
   );
@@ -350,6 +363,7 @@ function LoadCard({
             stop={stop}
             isNext={i === nextIndex}
             isLast={i === load.stops.length - 1}
+            loadActive={load.status === "active"}
             now={now}
             hoursWarning={i === nextIndex && !reach.ok ? reach.reason : null}
             origin={load.truck?.current_location ?? null}
@@ -365,6 +379,7 @@ export default async function ActiveLoadsPage() {
   const loads = await getLoads({ routedEtas: true });
   const activeLoads = activeOf(loads);
   const plannedLoads = plannedOf(loads);
+  const completedLoads = recentlyCompletedOf(loads, now);
   const alertLog = await getRecentAlerts(loads);
   const [trucks, drivers, orders] = await Promise.all([
     getTrucks(),
@@ -498,7 +513,9 @@ export default async function ActiveLoadsPage() {
             </Card>
           ) : null}
 
-          {activeLoads.length === 0 && plannedLoads.length === 0 ? (
+          {activeLoads.length === 0 &&
+          plannedLoads.length === 0 &&
+          completedLoads.length === 0 ? (
             <Card>
               <EmptyState
                 icon="local_shipping"
@@ -518,6 +535,30 @@ export default async function ActiveLoadsPage() {
               unassignedOrders={unassignedOrders}
             />
           ))}
+
+          {completedLoads.length > 0 ? (
+            <details className="group">
+              <summary className="flex cursor-pointer items-center gap-2 rounded-sm px-1 py-2 text-body-sm text-ink-muted hover:text-ink">
+                <Icon
+                  name="expand_more"
+                  className="text-[18px] transition-transform group-open:rotate-180"
+                />
+                Completed in the last 24 hours ({completedLoads.length})
+              </summary>
+              <div className="mt-2 space-y-4">
+                {completedLoads.map((load) => (
+                  <LoadCard
+                    key={load.id}
+                    load={load}
+                    now={now}
+                    trucks={trucks}
+                    drivers={drivers}
+                    unassignedOrders={unassignedOrders}
+                  />
+                ))}
+              </div>
+            </details>
+          ) : null}
         </div>
 
         <Card className="xl:sticky xl:top-[calc(var(--spacing-topbar)+1.5rem)] xl:self-start">

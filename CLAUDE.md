@@ -501,6 +501,32 @@ menu on each load card.
 - Removed and deleted orders revert to `pending` and reappear in the Orders
   Queue. The work is never lost, only the plan.
 
+## Finishing a load — manual until the geofence engine exists
+
+`markStopDelivered` / `undeliverStop` in `lib/data/mutations.ts`, on each stop
+row of an **active** load in Active Loads (`stop-delivery.tsx`).
+
+The architecture doc has `load_items.delivered_at` stamped by the geofencing
+engine (arrival → dwell → departure), which also fires the customer's
+delivery-complete alert. That engine is unbuilt, so nothing ends a load on its
+own. Until it lands, a dispatcher marks the drop when the driver confirms it;
+the button stays afterwards as the override for a GPS gap or a phoned-in
+delivery.
+
+- **`markStopDelivered`** sets `delivered_at`, cascades `orders.status` →
+  `delivered`, and once every stop on the load is delivered sets `loads.status`
+  → `completed`. It does **not** send the customer alert — that stays the alert
+  engine's job (`UNIQUE (load_item_id, type)` will guard the double-send).
+- **`undeliverStop`** is the undo. Refused once a `delivery_complete`
+  notification exists for the stop — same threshold as `unstartLoad` /
+  `deleteLoad`. It reopens a `completed` load unless the truck or driver is
+  already on another `active` load (the clash `startLoad` prevents), in which
+  case the stop is un-delivered but the load stays `completed` and the result
+  says so.
+- A completed load drops off the active board; Active Loads keeps a
+  **"Completed in the last 24 hours"** section (`recentlyCompletedOf`) so a
+  mistaken delivery is still undoable after the card would otherwise vanish.
+
 ## Truck data ownership
 
 `trucks` has two writers, and the split is load-bearing:
