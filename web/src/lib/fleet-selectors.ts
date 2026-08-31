@@ -10,8 +10,37 @@ import type { LoadView, Stop } from "./types";
  * needs these, so they live where both sides can reach them.
  */
 
-/** Geofence radius. Matches the alert rule in the architecture doc. */
+/** "Approaching" ring — the proximity-alert distance in the architecture doc. */
 export const GEOFENCE_RADIUS_M = 5_000;
+
+/**
+ * "At the stop" ring. Tight enough that being inside means the truck is
+ * actually at the customer, loose enough for GPS scatter and a delivery point
+ * that may only be a GEOMETRIC_CENTER geocode. Arrival, dwell and auto-delivery
+ * (migration 0014 + the GPS webhook) are judged against this — never the 5 km
+ * proximity ring.
+ */
+export const GEOFENCE_ARRIVAL_RADIUS_M = 200;
+
+/**
+ * How long a truck must stay inside the arrival ring before leaving counts as
+ * a completed visit that may auto-stamp `delivered_at`. Filters out driving
+ * past and stopping at a nearby light.
+ */
+export const GEOFENCE_MIN_DWELL_SECONDS = 120;
+
+/**
+ * Seconds the truck has been sitting at this stop right now, or null if it is
+ * not currently inside the arrival ring. Uses the recorded visit, not the live
+ * `distance_m`, so it survives the truck's position being briefly stale.
+ */
+export function onSiteSeconds(stop: Stop, now: Date): number | null {
+  if (!stop.visit || stop.visit.exited_at !== null) return null;
+  return Math.max(
+    0,
+    Math.round((now.getTime() - new Date(stop.visit.entered_at).getTime()) / 1000),
+  );
+}
 
 export function activeOf(loads: LoadView[]): LoadView[] {
   return loads.filter((l) => l.status === "active");

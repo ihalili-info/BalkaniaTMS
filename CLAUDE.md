@@ -52,6 +52,11 @@ keep it and `supabase/migrations/` in sync.
     reused across imports, keyed on Eircode (IE) or postcode + address line.
     `manual` fixes outrank and are never overwritten by an automatic geocode
     (`upsert_geocode_cache` enforces it). `geocode_cache_geo` exposes lat/lng.
+  - `0014_stop_visits.sql` — `stop_visits`: one row per period a truck sat
+    inside a stop's arrival ring. Written by the GPS webhook
+    (`lib/telematics/geofence.ts`); closing one after enough dwell auto-stamps
+    `load_items.delivered_at`. Partial unique index keeps at most one open
+    visit per stop.
 - `web/` — Next.js 16 (App Router, TypeScript, Tailwind v4) admin panel. See
   [web/README.md](web/README.md) for its layout and conventions.
   - `src/app/globals.css` — the entire design system as Tailwind v4 `@theme` tokens
@@ -172,8 +177,9 @@ header, though the code detects them by content:
   `text/plain` — read the raw body, then `JSON.parse`.
 
 **15-second ack deadline, only `200` counts, 2 retries then discarded.** Writes
-are small enough to stay in the request path for now; heavy work would need a
-queue.
+are small enough to stay in the request path for now — the position update plus
+`evaluateGeofence()` (a handful of small queries against the truck's one active
+load) per stored fix. Heavy work would need a queue.
 
 **Fleet sync.** `Sync from Reveal` on the Fleet page pulls `/cmd/v1/vehicles`
 and creates/updates truck rows keyed on Vehicle Number. Two rules make it safe
@@ -517,28 +523,42 @@ menu on each load card.
 - Removed and deleted orders revert to `pending` and reappear in the Orders
   Queue. The work is never lost, only the plan.
 
-## Finishing a load — manual until the geofence engine exists
+## Finishing a load
 
-`markStopDelivered` / `undeliverStop` in `lib/data/mutations.ts`, on each stop
-row of an **active** load in Active Loads (`stop-delivery.tsx`).
+`load_items.delivered_at` gets set two ways, and both run the **same** cascade
+— `settleStopDelivered` in `lib/data/stop-delivery.ts`: `orders.status` →
+`delivered`, `loads.status` → `completed` once every stop is done, and any open
+`stop_visits` row closed.
 
-The architecture doc has `load_items.delivered_at` stamped by the geofencing
-engine (arrival → dwell → departure), which also fires the customer's
-delivery-complete alert. That engine is unbuilt, so nothing ends a load on its
-own. Until it lands, a dispatcher marks the drop when the driver confirms it;
-the button stays afterwards as the override for a GPS gap or a phoned-in
-delivery.
+**Automatic — the geofence webhook.** `lib/telematics/geofence.ts`, called from
+the GPS webhook after each *newer* fix is stored. It compares the position to
+the active load's undelivered stops:
 
-- **`markStopDelivered`** sets `delivered_at`, cascades `orders.status` →
-  `delivered`, and once every stop on the load is delivered sets `loads.status`
-  → `completed`. It does **not** send the customer alert — that stays the alert
-  engine's job (`UNIQUE (load_item_id, type)` will guard the double-send).
-- **`undeliverStop`** is the undo. Refused once a `delivery_complete`
-  notification exists for the stop — same threshold as `unstartLoad` /
-  `deleteLoad`. It reopens a `completed` load unless the truck or driver is
-  already on another `active` load (the clash `startLoad` prevents), in which
-  case the stop is un-delivered but the load stays `completed` and the result
-  says so.
+- inside `GEOFENCE_ARRIVAL_RADIUS_M` (200 m) with no open visit → open one
+- still inside → extend `last_seen_at` / `min_distance_m`
+- moved outside, and it dwelled ≥ `GEOFENCE_MIN_DWELL_SECONDS` (120 s) → close
+  the visit and auto-stamp `delivered_at` (= `last_seen_at`, not the later fix),
+  `auto_delivered = TRUE`
+
+"Arrived, stayed, left" is the signal — a drive-past never dwells. A truck that
+**parks at its final drop and never leaves the ring** is left for the manual
+button. It still does **not** send the customer alert — that alert engine is
+unbuilt. Never throws; a geofence hiccup must not make Verizon retry a stored
+fix. The webhook `revalidatePath`s the board only when something auto-delivered.
+
+**Manual — `markStopDelivered` / `undeliverStop`** in `lib/data/mutations.ts`,
+on each stop row of an **active** load in Active Loads (`stop-delivery.tsx`).
+The override for a GPS gap, a phoned-in delivery, or the park-at-final-drop
+case. `markStopDelivered` calls the same `settleStopDelivered`.
+
+- **`undeliverStop`** is the undo (manual *and* auto deliveries). Refused once a
+  `delivery_complete` notification exists for the stop — same threshold as
+  `unstartLoad` / `deleteLoad`. Reopens a `completed` load unless the truck or
+  driver is already on another `active` load (the clash `startLoad` prevents),
+  in which case the stop is un-delivered but the load stays `completed` and the
+  result says so.
+- Active Loads shows **"On site · Nm"** while a truck is inside a stop's ring,
+  and a **geofence** tag on a stop that auto-delivered.
 - A completed load drops off the active board; Active Loads keeps a
   **"Completed in the last 24 hours"** section (`recentlyCompletedOf`) so a
   mistaken delivery is still undoable after the card would otherwise vanish.
@@ -640,11 +660,19 @@ front of Google), and `fixOrderAddress` (writes a `manual` entry).
 
 ## Known gaps
 
-- **ETA-based geofence *alert firing*** still needs the geofence engine itself,
-  which is unbuilt. `isApproaching()` now has a routed-ETA signal, but nothing
-  fires `notifications` rows yet. `estimateMinutes()` in `lib/format.ts`
-  remains a crude 45 km/h stand-in for display only and must never gate an
-  alert.
+- **Geofence *customer alerts* are still unbuilt.** Arrival tracking and
+  auto-delivery exist (`stop_visits`, `lib/telematics/geofence.ts` — see
+  "Finishing a load"), but nothing writes `notifications` rows: no dispatch
+  confirmation, no proximity alert, no delivery-complete SMS. Wiring those to
+  the visit lifecycle is a separate task, bound by the opt-out / GDPR rules and
+  by real per-message cost. `estimateMinutes()` in `lib/format.ts` remains a
+  crude 45 km/h stand-in for display only and must never gate an alert.
+- **Geofence thresholds are unvalidated.** `GEOFENCE_ARRIVAL_RADIUS_M` (200 m)
+  and `GEOFENCE_MIN_DWELL_SECONDS` (120 s) in `lib/fleet-selectors.ts` are
+  first guesses — no admin screen tunes them, and `min_distance_m` on
+  `stop_visits` is the signal to review them against once there is real data.
+- **A truck parked at its final drop never auto-delivers** — the visit stays
+  open because the truck never exits the ring. The manual button covers it.
 - GPS polling is capped by the **provider**, not by Vercel. Verizon asks for no
   more than one call per vehicle every 3–5 minutes, and there is no fleet-wide
   endpoint — so polling costs one HTTP call per truck per cycle. Vercel Cron's

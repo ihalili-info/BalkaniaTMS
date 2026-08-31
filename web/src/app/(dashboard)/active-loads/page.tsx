@@ -28,6 +28,7 @@ import {
   getTrucks,
   isApproaching,
   loadProgress,
+  onSiteSeconds,
   plannedOf,
   recentlyCompletedOf,
   stopEtaMinutes,
@@ -94,7 +95,8 @@ function StopRow({
   }));
 
   const delivered = stop.delivered_at !== null;
-  const approaching = !delivered && isApproaching(stop);
+  const onSite = delivered ? null : onSiteSeconds(stop, now);
+  const approaching = !delivered && onSite === null && isApproaching(stop);
   const eta = stopEtaMinutes(stop);
   const routed = stop.eta_source === "routed";
 
@@ -135,7 +137,11 @@ function StopRow({
           <span className="font-mono text-data-sm text-ink-subtle">
             {stop.order.crm_order_id}
           </span>
-          {approaching ? (
+          {onSite !== null ? (
+            <Badge tone="ok" dot pulse title="Truck is inside this stop's arrival ring">
+              On site · {formatDuration(onSite)}
+            </Badge>
+          ) : approaching ? (
             <Badge tone="warn" dot pulse>
               {routed && eta !== null
                 ? `Approaching · ${eta} min`
@@ -174,6 +180,15 @@ function StopRow({
               <p className="text-caption text-ink-subtle">
                 {relativeTime(stop.delivered_at!, now)}
               </p>
+              {stop.visit?.auto_delivered ? (
+                <p
+                  className="flex items-center justify-end gap-0.5 text-caption text-ink-subtle"
+                  title="Marked delivered automatically — truck dwelled at the stop and left"
+                >
+                  <Icon name="my_location" className="text-[12px]" />
+                  geofence
+                </p>
+              ) : null}
             </>
           ) : (
             <>

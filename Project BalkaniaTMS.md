@@ -49,12 +49,13 @@
 * **CRM Ingestion:** Webhook endpoint (`/api/webhooks/crm`) receives processed orders and geocodes the street address into a `GEOGRAPHY(Point, 4326)` coordinate. Orders that fail geocoding are flagged for manual address correction in the Admin Panel rather than silently dropped.
 * **Manual Load Assignment:** Interface allowing dispatchers to select target orders, assign them to trucks, and set sequence stop orders. Assigning a load transitions `orders.status` to `assigned`.
 * **Status Ownership:** `orders.status` is updated at three points — `assigned` on load assignment, `en_route` when the dispatch confirmation notification is sent, `delivered` when the corresponding `load_items.delivered_at` is set.
-* **Finishing a load:** `load_items.delivered_at` will be stamped by the geofencing engine (§2) once it exists. Until then a dispatcher marks each drop manually on the active load (`markStopDelivered` / `undeliverStop`); the last stop delivered moves `loads.status` to `completed`. The manual control stays afterwards as the override for a GPS gap or a phoned-in delivery.
+* **Finishing a load:** `load_items.delivered_at` is stamped two ways, both running the same cascade (`settleStopDelivered`): automatically by the geofence check in the GPS webhook (§2) when a truck dwells at a stop and leaves, or by a dispatcher marking the drop by hand (`markStopDelivered` / `undeliverStop`) for a GPS gap, a phoned-in delivery, or a truck that parks at its final drop. The last stop delivered moves `loads.status` to `completed`. Neither path sends a customer message — the geofence-driven alerts are still unbuilt.
 
 ### 2. Live Tracking & Geofencing Engine
 * **GPS Sync:** Verizon Connect Reveal pushes each fix to `/api/webhooks/gps`, updating `trucks.current_location` in near real-time. The route authenticates with HTTP Basic (credentials we choose and register with Verizon) and guards every write with Reveal's per-vehicle `SequenceId`, because webhook deliveries retry, duplicate and arrive out of order. Polling the RAD API is a fallback only: there is no fleet-wide endpoint, so it costs one HTTP call per truck per cycle, and Verizon asks for no more than one call per vehicle every 3–5 minutes. That provider limit — not Vercel Cron's one-minute floor — is what bounds how fresh a polled position can be.
 * **Identifier:** `trucks.gps_device_id` stores Reveal's **Vehicle Number**, not the device serial. Verizon does not populate that field on account creation; it must be set per vehicle in Reveal first.
 * **Spatial Querying:** Uses PostgreSQL PostGIS functions (`ST_Distance`) to compute distance between trucks and destination stops.
+* **Arrival tracking:** each stored fix is checked against the active load's undelivered stops (`lib/telematics/geofence.ts`). Coming inside a 200 m ring opens a `stop_visits` row; leaving after ≥ 120 s dwell closes it and auto-stamps `delivered_at`. A drive-past never dwells; a truck parked at its final drop never leaves the ring and is left for the manual button. **No customer message is sent** — the geofence-driven alerts (§4) are still unbuilt.
 * **Realtime Dashboard:** Supabase Realtime updates dispatcher maps dynamically without full page reloads.
 
 ### 3. Driver Navigation Handoff
@@ -131,6 +132,25 @@ CREATE TABLE load_items (
   stop_sequence INT NOT NULL,
   delivered_at TIMESTAMPTZ
 );
+
+-- 4b. Stop Visits (migration 0014) — one row per contiguous period a truck sat
+-- inside a stop's arrival ring. Written by the GPS webhook; closing one after
+-- enough dwell auto-stamps load_items.delivered_at (auto_delivered = TRUE).
+-- Does not send customer messages.
+CREATE TABLE stop_visits (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  load_item_id UUID NOT NULL REFERENCES load_items(id) ON DELETE CASCADE,
+  truck_id UUID REFERENCES trucks(id) ON DELETE SET NULL,
+  entered_at TIMESTAMPTZ NOT NULL,
+  last_seen_at TIMESTAMPTZ NOT NULL,   -- latest fix still inside the ring
+  exited_at TIMESTAMPTZ,               -- NULL while the truck is still there
+  min_distance_m DOUBLE PRECISION NOT NULL,
+  auto_delivered BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+-- At most one open visit per stop.
+CREATE UNIQUE INDEX idx_stop_visits_open
+  ON stop_visits (load_item_id) WHERE exited_at IS NULL;
 
 -- 5. Notifications Table (per-type alert log — replaces a single boolean flag
 -- so dispatch/proximity/delivery alerts can each fire independently per stop)

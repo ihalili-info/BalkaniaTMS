@@ -168,6 +168,23 @@ export interface NotificationLog {
   sent_at: string;
 }
 
+/**
+ * A period a truck spent inside a stop's arrival ring (migration 0014).
+ * Written by the GPS webhook; closing one may auto-stamp `delivered_at`.
+ */
+export interface StopVisit {
+  id: string;
+  load_item_id: string;
+  truck_id: string | null;
+  entered_at: string;
+  /** Most recent fix still inside the ring. `exited_at` null ⇒ still there. */
+  last_seen_at: string;
+  exited_at: string | null;
+  min_distance_m: number;
+  auto_delivered: boolean;
+  created_at: string;
+}
+
 /* --- View models -----------------------------------------------------------
    Shapes the UI actually renders, i.e. the joins from the geofence query in
    the architecture doc, pre-resolved. */
@@ -190,6 +207,14 @@ export interface Stop extends LoadItem {
    */
   eta_source: "routed" | "straight_line";
   notifications: NotificationType[];
+  /**
+   * The truck's most recent visit to this stop's arrival ring, or null if it
+   * has not been inside one. `exited_at === null` means the truck is there now.
+   */
+  visit: Pick<
+    StopVisit,
+    "entered_at" | "last_seen_at" | "exited_at" | "min_distance_m" | "auto_delivered"
+  > | null;
 }
 
 export interface LoadView extends Load {

@@ -195,6 +195,29 @@ export async function getLoads(
     }
   }
 
+  // The truck's most recent visit to each stop's arrival ring (migration 0014).
+  // Ordered newest-first so the first row seen per stop is the one to keep.
+  const visitByStop = new Map<string, Stop["visit"]>();
+  if (stopIds.length > 0) {
+    const { data: visits } = await supabase
+      .from("stop_visits")
+      .select(
+        "load_item_id, entered_at, last_seen_at, exited_at, min_distance_m, auto_delivered",
+      )
+      .in("load_item_id", stopIds)
+      .order("entered_at", { ascending: false });
+    for (const v of visits ?? []) {
+      if (visitByStop.has(v.load_item_id)) continue;
+      visitByStop.set(v.load_item_id, {
+        entered_at: v.entered_at,
+        last_seen_at: v.last_seen_at,
+        exited_at: v.exited_at,
+        min_distance_m: Number(v.min_distance_m),
+        auto_delivered: v.auto_delivered,
+      });
+    }
+  }
+
   const views: LoadView[] = (loadRows ?? []).map((row) => {
     const truck = truckById.get(row.truck_id ?? "") ?? null;
     const driver = driverById.get(row.driver_id ?? "") ?? null;
@@ -221,6 +244,7 @@ export async function getLoads(
           drive_seconds: null,
           eta_source: "straight_line",
           notifications: sentByStop.get(item.id) ?? [],
+          visit: visitByStop.get(item.id) ?? null,
         };
       })
       .filter((s): s is Stop => s !== null)
@@ -306,6 +330,8 @@ async function attachRoutedEtas(views: LoadView[]): Promise<void> {
 
 export {
   GEOFENCE_RADIUS_M,
+  GEOFENCE_ARRIVAL_RADIUS_M,
+  GEOFENCE_MIN_DWELL_SECONDS,
   APPROACH_ETA_MINUTES,
   activeOf,
   plannedOf,
@@ -318,6 +344,7 @@ export {
   stopsInGeofence,
   stopEtaMinutes,
   isApproaching,
+  onSiteSeconds,
 } from "../fleet-selectors";
 
 /* --- alert log --------------------------------------------------------------- */

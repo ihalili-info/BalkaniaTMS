@@ -24,6 +24,7 @@ import {
 } from "@/lib/routing/google";
 import { coordKey } from "@/lib/format";
 import { DEPOT } from "@/lib/geo/reference";
+import { settleStopDelivered } from "@/lib/data/stop-delivery";
 
 /**
  * Writes.
@@ -707,19 +708,17 @@ export async function unstartLoad(loadId: string): Promise<WriteResult> {
 }
 
 /**
- * Marks one stop delivered — the manual counterpart to the geofence engine.
+ * Marks one stop delivered — the manual counterpart to the geofence webhook.
  *
- * The architecture doc has `load_items.delivered_at` set by the geofencing
- * engine (arrival, dwell, departure), which also fires the customer's
- * delivery-complete alert. That engine is unbuilt, so nothing finishes a load
- * today. Until it lands a dispatcher records the drop here when the driver
- * confirms it; afterwards the button stays as the override for a GPS gap or a
- * phoned-in delivery.
+ * `stop_visits` + the GPS webhook now stamp `load_items.delivered_at` on their
+ * own when a truck dwells at a stop and leaves (migration 0014). This is the
+ * same operation by hand: the override for a GPS gap, a phoned-in delivery, or
+ * a drop where the truck parks and never "leaves" the ring.
  *
- * Cascades the two status columns the doc ties to this event: `orders.status`
- * → `delivered`, and `loads.status` → `completed` once every stop on the load
- * is delivered. It deliberately does **not** send the customer alert — that is
- * the alert engine's job, guarded by `UNIQUE (load_item_id, type)`.
+ * The cascade (`orders.status` → `delivered`, `loads.status` → `completed`
+ * once every stop is done, open visit closed) lives in `settleStopDelivered`
+ * so this path and the webhook can never diverge. It deliberately does **not**
+ * send the customer alert — that is the still-unbuilt alert engine's job.
  */
 export async function markStopDelivered(
   loadItemId: string,
@@ -751,36 +750,12 @@ export async function markStopDelivered(
       };
     }
 
-    const deliveredAt = new Date().toISOString();
-    const { error: stopError } = await supabase
-      .from("load_items")
-      .update({ delivered_at: deliveredAt })
-      .eq("id", loadItemId)
-      .is("delivered_at", null);
-    if (stopError) return { ok: false, message: stopError.message };
-
-    await supabase
-      .from("orders")
-      .update({ status: "delivered", updated_at: deliveredAt })
-      .eq("id", item.order_id);
-
-    // Every stop delivered → the load is done.
-    const { data: siblings, error: sibError } = await supabase
-      .from("load_items")
-      .select("delivered_at")
-      .eq("load_id", item.load_id);
-    if (sibError) return { ok: false, message: sibError.message };
-
-    const allDelivered =
-      (siblings ?? []).length > 0 &&
-      (siblings ?? []).every((s) => s.delivered_at !== null);
-    if (allDelivered) {
-      await supabase
-        .from("loads")
-        .update({ status: "completed" })
-        .eq("id", item.load_id)
-        .eq("status", "active");
-    }
+    const settled = await settleStopDelivered(
+      supabase,
+      { id: item.id, load_id: item.load_id, order_id: item.order_id },
+      new Date().toISOString(),
+    );
+    if (!settled.ok) return { ok: false, message: settled.message };
 
     revalidatePath("/active-loads");
     revalidatePath("/orders-queue");
@@ -788,7 +763,9 @@ export async function markStopDelivered(
     revalidatePath("/");
     return {
       ok: true,
-      message: allDelivered ? "Load complete — every stop delivered." : null,
+      message: settled.loadCompleted
+        ? "Load complete — every stop delivered."
+        : null,
     };
   } catch (e) {
     return { ok: false, message: (e as Error).message };

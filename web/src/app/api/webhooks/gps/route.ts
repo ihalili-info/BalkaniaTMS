@@ -1,6 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 
+import { revalidatePath } from "next/cache";
+
 import { createServiceClient } from "@/lib/supabase/service";
+import { evaluateGeofence } from "@/lib/telematics/geofence";
 import {
   isNewerFix,
   normaliseGpsPush,
@@ -249,6 +252,7 @@ export async function POST(request: Request) {
     (v ?? "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
 
   let stored = 0;
+  let autoDelivered = false;
   const skipped: string[] = [];
 
   for (const fix of accepted) {
@@ -320,10 +324,32 @@ export async function POST(request: Request) {
       outcome: "stored",
       reason: null,
     });
+
+    // Now the position is stored, check it against the truck's active load:
+    // record arrival at a stop, and auto-mark it delivered once the truck has
+    // dwelled there and moved on (migration 0014). Never throws.
+    const geo = await evaluateGeofence(supabase, {
+      truckId: truck.id,
+      lat: fix.lat,
+      lng: fix.lng,
+      at: fix.recordedAt,
+    });
+    if (geo.autoDelivered.length > 0) autoDelivered = true;
   }
 
   await logDeliveries(log);
-  return Response.json({ stored, skipped, rejected }, { status: 200 });
+
+  // A stop flipping to delivered changes the dispatch board, the queue and the
+  // map. Position-only fixes do not — those pages read the live position on
+  // navigation and the map has its own refresh.
+  if (autoDelivered) {
+    revalidatePath("/active-loads");
+    revalidatePath("/orders-queue");
+    revalidatePath("/live-fleet-map");
+    revalidatePath("/");
+  }
+
+  return Response.json({ stored, autoDelivered, skipped, rejected }, { status: 200 });
 }
 
 /** Reveal's endpoint form pings the URL; answer without touching the database. */
