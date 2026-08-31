@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 
 import { Badge, Button, Icon, cx } from "@/components/ui";
+import { relativeTime } from "@/lib/format";
 import { sendDriverRouteMessage } from "@/lib/data/messaging";
 import {
   routeMessage,
@@ -33,6 +34,12 @@ export function SendRouteDialog({
   const [selected, setSelected] = useState<NavApp[]>(["google", "waze"]);
   const [channel, setChannel] = useState<Channel>("sms");
   const [forceGsm, setForceGsm] = useState(false);
+  // The route the driver opens starts from wherever their phone is — that is
+  // what "start my navigation" should mean. The truck's last GPS fix is offered
+  // as an override, but it can be badly stale (the push feed may be down), so
+  // it is not the default.
+  const [fromTruckFix, setFromTruckFix] = useState(false);
+  const now = useMemo(() => new Date(), []);
   const [copied, setCopied] = useState<NavApp | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -50,9 +57,12 @@ export function SendRouteDialog({
     [load.stops],
   );
 
+  const truckFix = load.truck?.current_location ?? null;
+
   const urls = useMemo(() => {
     const route = {
-      origin: load.truck?.current_location ?? null,
+      // No origin → the driver's navigation app starts from their live GPS.
+      origin: fromTruckFix ? truckFix : null,
       stops: remaining
         .map((s) => s.order.delivery_location)
         .filter((p): p is NonNullable<typeof p> => p !== null),
@@ -60,7 +70,7 @@ export function SendRouteDialog({
     return Object.fromEntries(
       APPS.map((app) => [app, navigationUrl(app, route)]),
     ) as Record<NavApp, string | null>;
-  }, [load.truck, remaining]);
+  }, [fromTruckFix, truckFix, remaining]);
 
   const geocodedCount = remaining.filter(
     (s) => s.order.delivery_location !== null,
@@ -145,6 +155,32 @@ export function SendRouteDialog({
               accept one destination, so they get the <em>next</em> stop — not
               the last, which would skip everything between.
             </p>
+
+            <div className="mb-3 rounded-sm border border-hairline bg-surface-muted px-3 py-2">
+              <p className="flex items-center gap-1.5 text-caption text-ink-muted">
+                <Icon name="my_location" className="text-[15px] text-ink-subtle" />
+                {fromTruckFix
+                  ? "Route starts from the truck's last GPS fix."
+                  : "Route starts from the driver's current location when they open it."}
+              </p>
+              {truckFix ? (
+                <label className="mt-1.5 flex items-start gap-2 text-caption text-ink-muted">
+                  <input
+                    type="checkbox"
+                    checked={fromTruckFix}
+                    onChange={(e) => setFromTruckFix(e.target.checked)}
+                    className="mt-0.5 size-3.5 accent-brand"
+                  />
+                  <span>
+                    Start from the truck&rsquo;s last GPS fix (
+                    {relativeTime(load.truck!.location_updated_at, now)}) instead.
+                    Only useful if the driver is at the truck now — a stale fix
+                    sends them the wrong way.
+                  </span>
+                </label>
+              ) : null}
+            </div>
+
             <ul className="space-y-2">
               {APPS.map((app) => {
                 const target = NAV_TARGETS[app];

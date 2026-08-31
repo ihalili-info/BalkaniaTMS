@@ -247,6 +247,14 @@ Maps. The three are **not** equivalent and the UI must not imply they are:
   cannot pass under a 4.0 m bridge, or applies weight and ADR restrictions.
   `truckRoutingWarning()` states this at the point of handoff, checked against
   the load's destination countries.
+- **The sent route starts from the driver, not the truck.** `SendRouteDialog`
+  builds the driver's links with **no `origin`**, so their navigation app
+  starts from its own live GPS — which is what "start my run" should mean, and
+  avoids baking in a `trucks.current_location` fix that may be badly stale if
+  the push feed is down. A checkbox pins the origin to the truck's last fix
+  (with its age shown) for the case where the driver is standing at the truck.
+  `navigationUrl()` still only emits `origin`/`saddr` when one is passed; Waze
+  has no origin parameter and always uses the device position.
 
 Keep the default SMS body inside GSM-7. A single em dash or accented character
 flips the whole message to UCS-2 and cuts the per-segment budget from 153 to 67
