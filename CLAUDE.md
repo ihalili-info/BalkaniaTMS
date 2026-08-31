@@ -57,6 +57,10 @@ keep it and `supabase/migrations/` in sync.
     (`lib/telematics/geofence.ts`); closing one after enough dwell auto-stamps
     `load_items.delivered_at`. Partial unique index keeps at most one open
     visit per stop.
+  - `0015_crm_webhook_log.sql` — `crm_webhook_deliveries`: append-only
+    diagnostic log of every CRM ingestion push to `/api/webhooks/crm`
+    (`action`, `outcome`, `reason`, and the raw `payload` on failure only).
+    Same shape and retention posture as `gps_webhook_deliveries` (0009).
 - `web/` — Next.js 16 (App Router, TypeScript, Tailwind v4) admin panel. See
   [web/README.md](web/README.md) for its layout and conventions.
   - `src/app/globals.css` — the entire design system as Tailwind v4 `@theme` tokens
@@ -121,10 +125,20 @@ endpoint) and truck updates go through a **field allow-list**, so a crafted
 call cannot touch `current_location` or `location_updated_at` — the ownership
 split 0002 exists to protect.
 
-**Not done:** no CRM webhook, no tachograph feed, no customs provider, no
-basemap. Creating trucks, drivers and loads from the UI is not built — the
-Fleet page edits existing rows but "Add truck" does nothing yet, so the first
-rows go in through Supabase.
+**Not done:** no tachograph feed, no customs provider, no basemap. Creating
+trucks, drivers and loads from the UI is not built — the Fleet page edits
+existing rows but "Add truck" does nothing yet, so the first rows go in
+through Supabase.
+
+**CRM ingestion is built.** `POST /api/webhooks/crm`
+(`app/api/webhooks/crm/route.ts`), Bearer auth on `CRM_WEBHOOK_SECRET`, fed by
+a standalone CRM connector service. The contract is `lib/crm/payload.ts` — a
+pure module that mirrors `orders-import.ts` field for field. New refs insert;
+an existing ref updates **only while pending** (on a load ⇒ reported, not
+applied); `cancelled:true` removes a pending order (same rule as
+`deleteOrders`). Geocoding is supplied-coords → cache → Google (budgeted per
+request), otherwise the order queues like a failed CSV row. `crm-feed.ts` +
+the CRM feed card on Integration Settings read `crm_webhook_deliveries`.
 
 **Empty by design.** The database has no trucks, drivers or loads. Every screen
 has an empty state; nothing is estimated or back-filled.
@@ -312,10 +326,12 @@ probably unnecessary; it is sent only when `SENT_PROFILE_ID` is set.
 
 ## Order intake
 
-Until the CRM webhook is built, orders arrive through **CSV import** on the
-Orders Queue. It is a stopgap, and the code says so — but it lands orders in
-exactly the shape the webhook will produce, so the two paths converge instead of
-diverging.
+Orders arrive two ways, and they converge on one shape rather than diverging:
+the **CRM webhook** (`POST /api/webhooks/crm`, see the CRM ingestion note under
+Status) and **CSV import** on the Orders Queue for one-off spreadsheets.
+`lib/crm/payload.ts` and `lib/orders-import.ts` deliberately mirror each other
+— same required set, same `regions.ts` postcode/country rules, same
+flag-never-drop treatment of an address that will not geocode.
 
 - `lib/csv.ts` is a real RFC 4180 parser, not `split(",")`. Irish addresses are
   full of commas (`"Station Road, Blarney, Co. Cork"`), and Excel adds a BOM,
@@ -339,8 +355,8 @@ diverging.
   queue for geocoding — the same rule the CRM path must follow: flag, never
   drop.
 
-When the webhook lands, keep the import: a manual path for one-off spreadsheets
-is worth having regardless.
+The CSV import stays now the webhook has landed: a manual path for one-off
+spreadsheets is worth having regardless.
 
 ## Access control
 

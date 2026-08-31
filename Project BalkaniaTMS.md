@@ -45,8 +45,8 @@
 ### 1. Ingestion & Load Planning (Admin Panel)
 * **Design Framework:** Built on the in-repo design system — see `web/README.md` for tokens and conventions.
 * **Access Control:** Authentication via **Supabase Auth**; `profiles.role` decides which modules are reachable. `admin` gets everything including Integrations and its connector configuration; `dispatcher` gets everything else. Enforced in the database by RLS (migration 0004), not only in the UI — the sidebar filter is a convenience, the policies are the control. New accounts default to `dispatcher`, and nobody can edit their own role.
-* **CSV Import (interim):** Until the webhook exists, dispatchers import orders from a spreadsheet on the Orders Queue. Rows are validated against the same required fields and per-country postcode rules the webhook will use; rows with errors are skipped rather than guessed at, and imported orders without coordinates queue for geocoding exactly as a failed geocode does. Worth keeping after the webhook ships, for one-off spreadsheets.
-* **CRM Ingestion:** Webhook endpoint (`/api/webhooks/crm`) receives processed orders and geocodes the street address into a `GEOGRAPHY(Point, 4326)` coordinate. Orders that fail geocoding are flagged for manual address correction in the Admin Panel rather than silently dropped.
+* **CSV Import:** Dispatchers can import orders from a spreadsheet on the Orders Queue. Rows are validated against the same required fields and per-country postcode rules the CRM webhook uses; rows with errors are skipped rather than guessed at, and imported orders without coordinates queue for geocoding exactly as a failed geocode does. Kept alongside the webhook for one-off spreadsheets.
+* **CRM Ingestion:** Webhook endpoint (`POST /api/webhooks/crm`) receives processed orders from the CRM connector (Bearer auth on `CRM_WEBHOOK_SECRET`) and geocodes the street address into a `GEOGRAPHY(Point, 4326)` coordinate — supplied lat/lng, then the geocode cache, then Google when configured (budgeted per request). Orders that resolve to nothing are flagged for manual address correction rather than silently dropped. The contract and validation live in `web/src/lib/crm/payload.ts` and mirror the CSV importer field for field. Re-posting an existing `crm_order_id` updates the order **only while it is still pending**; once it is on a load, updates and `cancelled:true` are reported, not applied. Every call is logged to `crm_webhook_deliveries` (diagnostic only), surfaced on the CRM feed card in Integration Settings.
 * **Manual Load Assignment:** Interface allowing dispatchers to select target orders, assign them to trucks, and set sequence stop orders. Assigning a load transitions `orders.status` to `assigned`.
 * **Status Ownership:** `orders.status` is updated at three points — `assigned` on load assignment, `en_route` when the dispatch confirmation notification is sent, `delivered` when the corresponding `load_items.delivered_at` is set.
 * **Finishing a load:** `load_items.delivered_at` is stamped two ways, both running the same cascade (`settleStopDelivered`): automatically by the geofence check in the GPS webhook (§2) when a truck dwells at a stop and leaves, or by a dispatcher marking the drop by hand (`markStopDelivered` / `undeliverStop`) for a GPS gap, a phoned-in delivery, or a truck that parks at its final drop. The last stop delivered moves `loads.status` to `completed`. Neither path sends a customer message — the geofence-driven alerts are still unbuilt.
@@ -178,6 +178,14 @@ CREATE TABLE geocode_cache (
   last_used_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- 7. Webhook delivery logs (migrations 0009 / 0015) — append-only, diagnostic
+-- only, never a source of truth. `gps_webhook_deliveries` records every Reveal
+-- GPS push; `crm_webhook_deliveries` records every CRM ingestion push (columns:
+-- crm_order_id, action IN ('upsert','cancel'), outcome IN ('created','updated',
+-- 'cancelled','skipped','rejected','unauthorized','bad_request'), reason,
+-- payload). Both keep the raw payload only on failure — it carries personal
+-- data — and are purged on the notification retention window.
 
 -- Spatial indexes for efficient proximity queries
 CREATE INDEX idx_trucks_location ON trucks USING GIST (current_location);

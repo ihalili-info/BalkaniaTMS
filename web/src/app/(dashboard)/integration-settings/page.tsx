@@ -14,10 +14,12 @@ import { requireAccess } from "@/lib/auth/guard";
 import { getCurrentUser } from "@/lib/auth/session";
 import { privacySettings } from "@/lib/integrations/policy";
 import { getGpsFeedHealth } from "@/lib/data/gps-feed";
+import { getCrmFeedHealth } from "@/lib/data/crm-feed";
 import { deriveStatus, loadConnectorStates } from "@/lib/integrations/store";
 
 import { ConnectorCard } from "./connector-card";
 import { GpsFeedCard } from "./gps-feed-card";
+import { CrmFeedCard } from "./crm-feed-card";
 import { TestConnectionsButton } from "./test-connections-button";
 
 import { AlertRules } from "./alert-rules";
@@ -31,6 +33,9 @@ export default async function IntegrationSettingsPage() {
 
   const states = await loadConnectorStates();
   const gpsHealth = await getGpsFeedHealth();
+  const crmHealth = await getCrmFeedHealth(
+    states.find((s) => s.connector.id === "crm")?.config.enabled === true,
+  );
   const user = await getCurrentUser();
   const canEdit = user !== null;
   const ready = states.filter((s) => deriveStatus(s) === "connected").length;
@@ -89,6 +94,8 @@ export default async function IntegrationSettingsPage() {
       </div>
 
       <GpsFeedCard health={gpsHealth} now={new Date()} />
+
+      <CrmFeedCard health={crmHealth} now={new Date()} />
 
       <AlertRules />
 

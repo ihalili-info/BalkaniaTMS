@@ -228,19 +228,20 @@ export const CONNECTORS: Connector[] = [
   {
     id: "crm",
     name: "CRM ingestion",
-    purpose: "Receives processed orders and geocodes the delivery address.",
+    purpose:
+      "Receives processed orders from the CRM connector, geocodes the delivery address, and keeps still-pending orders in step with updates and cancellations.",
     icon: "cloud_download",
-    status: "not_built",
+    status: "not_configured",
     envVars: ["CRM_WEBHOOK_SECRET"],
     secrets: ["CRM_WEBHOOK_SECRET"],
     endpoint: "POST /api/webhooks/crm",
-    note: "Route handler not implemented — orders arrive by CSV import until it is.",
+    note: "Bearer auth: the connector sends `Authorization: Bearer CRM_WEBHOOK_SECRET`. Body is `{ \"orders\": [...] }` (or a bare array / single object) using the same fields as the CSV importer — see the contract in lib/crm/payload.ts. An existing order is updated in place only while it is still pending; once it is on a load, updates and cancellations are reported, not applied. The CSV import on the Orders Queue stays for one-off spreadsheets.",
     fields: [
       {
         key: "enabled",
         label: "Accept CRM pushes",
         kind: "toggle",
-        help: "Leave off until the route exists.",
+        help: "A soft switch for the operator's own reference — the route authenticates on CRM_WEBHOOK_SECRET regardless. Turn off while the connector is being reconfigured.",
       },
     ],
   },
