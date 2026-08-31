@@ -72,6 +72,7 @@ export function AutoPlanDialog({
   const [error, setError] = useState<string | null>(null);
   const [dropped, setDropped] = useState<Set<number>>(new Set());
   const [overrides, setOverrides] = useState<Record<number, string>>({});
+  const [excluded, setExcluded] = useState<Set<string>>(new Set());
   const [geocoding, startGeocode] = useTransition();
   const [creating, startCreate] = useTransition();
 
@@ -80,7 +81,28 @@ export function AutoPlanDialog({
     [loadRefByOrderId],
   );
 
-  const missing = orders.filter(
+  // Orders the dispatcher pulled out of this plan. They stay in the queue,
+  // never committed, and the grouping recomputes without them — so removing a
+  // far-flung drop can tighten the groups that remain.
+  const plannableOrders = useMemo(
+    () => orders.filter((o) => !excluded.has(o.id)),
+    [orders, excluded],
+  );
+  const excludedOrders = useMemo(
+    () => orders.filter((o) => excluded.has(o.id)),
+    [orders, excluded],
+  );
+
+  const excludeOrder = (id: string) =>
+    setExcluded((prev) => new Set(prev).add(id));
+  const restoreOrder = (id: string) =>
+    setExcluded((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+
+  const missing = plannableOrders.filter(
     (o) => o.delivery_location === null && !onLoad.has(o.id),
   );
 
@@ -136,7 +158,7 @@ export function AutoPlanDialog({
   const plan = useMemo(
     () =>
       planLoads({
-        orders,
+        orders: plannableOrders,
         trucks,
         depot: DEPOT_LATLNG,
         originCountry: HOME_COUNTRY,
@@ -144,7 +166,7 @@ export function AutoPlanDialog({
         options,
         geometry,
       }),
-    [orders, trucks, onLoad, options, geometry],
+    [plannableOrders, trucks, onLoad, options, geometry],
   );
 
   const kept = plan.loads
@@ -216,9 +238,13 @@ export function AutoPlanDialog({
             </p>
             <h2 className="text-title text-ink">Auto-plan loads</h2>
             <p className="mt-0.5 text-body-sm text-ink-muted">
-              Groups {orders.length} selected order
-              {orders.length === 1 ? "" : "s"} by how close the drops are, and
-              sequences each run from the depot outwards.
+              Groups{" "}
+              {excluded.size > 0
+                ? `${plannableOrders.length} of ${orders.length} selected orders`
+                : `${orders.length} selected order${orders.length === 1 ? "" : "s"}`}{" "}
+              by how close the drops are, and sequences each run from the depot
+              outwards. Remove a drop with the ✕ on its row to leave it in the
+              queue.
             </p>
           </div>
           <button
@@ -543,6 +569,15 @@ export function AutoPlanDialog({
                           <span className="shrink-0 font-mono text-data-sm text-ink-subtle">
                             {stop.crm_order_id}
                           </span>
+                          <button
+                            type="button"
+                            aria-label={`Remove ${stop.customer_name} from the plan`}
+                            title="Remove this drop — it stays in the queue"
+                            onClick={() => excludeOrder(stop.id)}
+                            className="shrink-0 rounded-sm p-1 text-ink-subtle transition-colors hover:bg-danger-soft hover:text-danger"
+                          >
+                            <Icon name="close" className="text-[15px]" />
+                          </button>
                         </li>
                       ))}
                     </ol>
@@ -587,6 +622,45 @@ export function AutoPlanDialog({
                 ))}
               </ul>
             </details>
+          ) : null}
+
+          {excludedOrders.length > 0 ? (
+            <section className="mt-3 rounded-sm border border-hairline">
+              <p className="border-b border-hairline px-3 py-2 text-body-sm font-medium text-ink">
+                {excludedOrders.length} drop
+                {excludedOrders.length === 1 ? "" : "s"} you removed
+                <span className="ml-1 font-normal text-ink-subtle">
+                  — left in the queue, not planned
+                </span>
+              </p>
+              <ul className="max-h-40 divide-y divide-hairline overflow-y-auto">
+                {excludedOrders.map((o) => (
+                  <li
+                    key={o.id}
+                    className="flex items-center gap-3 px-3 py-1.5"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-body-sm text-ink">
+                        {o.customer_name}
+                      </span>
+                      <span className="block truncate text-caption text-ink-subtle">
+                        {o.delivery_address}
+                      </span>
+                    </span>
+                    <span className="shrink-0 font-mono text-data-sm text-ink-subtle">
+                      {o.crm_order_id}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => restoreOrder(o.id)}
+                      className="shrink-0 text-caption font-medium text-brand hover:underline"
+                    >
+                      Add back
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
           ) : null}
 
           {error ? (

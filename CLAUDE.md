@@ -428,6 +428,14 @@ one it falls back to a dependency-free SVG schematic (`components/plan-map.tsx`)
 Either way the connectors are **straight lines** — the geometry the planner
 sequenced on, not a routed path.
 
+- **Choosing what goes in.** Whole groups drop via the group checkbox; a single
+  drop is pulled with the ✕ on its row. A removed drop goes into an `excluded`
+  set (`auto-plan-dialog.tsx`), stays in the queue, and the grouping recomputes
+  without it — so removing a far-flung stop can tighten what's left. An
+  "Add back" list restores them. `excluded` filters the orders handed to
+  `planLoads`; the road matrix key stays keyed on the full selection so
+  toggling a drop never re-bills Google.
+
 - **Roads when routing is configured, straight lines otherwise.** With
   `ROUTING_API_KEY` set, sequencing, `routeMeters` and `routeSeconds` run on
   the Google Routes matrix (ferries included); clustering stays great-circle
