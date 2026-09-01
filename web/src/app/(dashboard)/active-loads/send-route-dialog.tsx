@@ -24,10 +24,12 @@ const APPS: NavApp[] = ["google", "waze", "apple"];
 
 export function SendRouteDialog({
   load,
+  linkShortenerOn,
   onSend,
   onClose,
 }: {
   load: LoadView;
+  linkShortenerOn: boolean;
   onSend: (summary: { channel: Channel; to: string }) => void;
   onClose: () => void;
 }) {
@@ -42,6 +44,7 @@ export function SendRouteDialog({
   const now = useMemo(() => new Date(), []);
   const [copied, setCopied] = useState<NavApp | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [sentWarning, setSentWarning] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -303,9 +306,37 @@ export function SendRouteDialog({
               Sent template, with{" "}
               <span className="font-mono text-data-sm">{routeUrl ?? "—"}</span>{" "}
               as its link. The template&rsquo;s own wording may not match this
-              exactly. When the short.io shortener is configured (Integrations),
-              this link is shortened before it&rsquo;s sent — the fix for an SMS
-              that arrives with the URL cut off.
+              exactly.
+            </p>
+
+            <p
+              className={cx(
+                "mt-2 flex items-start gap-2 rounded-sm border px-3 py-2 text-caption",
+                linkShortenerOn
+                  ? "border-ok-border bg-ok-soft text-ink-muted"
+                  : "border-warn-border bg-warn-soft text-ink-muted",
+              )}
+            >
+              <Icon
+                name={linkShortenerOn ? "link" : "link_off"}
+                className={cx(
+                  "mt-px text-[15px]",
+                  linkShortenerOn ? "text-ok" : "text-warn",
+                )}
+              />
+              {linkShortenerOn ? (
+                <span>
+                  The link is shortened via short.io before it&rsquo;s sent, so
+                  the SMS stays short enough to arrive in one piece.
+                </span>
+              ) : (
+                <span>
+                  short.io isn&rsquo;t set up, so the full link is sent — that is
+                  what arrives cut off. Add <span className="font-mono">SHORTIO_API_KEY</span>{" "}
+                  and <span className="font-mono">SHORTIO_DOMAIN</span> in
+                  Integrations, then run Test connections.
+                </span>
+              )}
             </p>
 
             {meta.unicode && channel === "sms" ? (
@@ -338,17 +369,38 @@ export function SendRouteDialog({
           </p>
         ) : null}
 
+        {sentWarning ? (
+          <p
+            role="alert"
+            className="mx-6 mb-3 flex items-start gap-2 rounded-sm border border-warn-border bg-warn-soft px-3 py-2 text-body-sm text-ink-muted"
+          >
+            <Icon name="warning" className="mt-px text-[17px] text-warn" />
+            {sentWarning}
+          </p>
+        ) : null}
+
         <footer className="flex flex-wrap items-center gap-2 border-t border-hairline px-6 py-3">
           <p className="mr-auto max-w-sm text-caption text-ink-subtle">
             Goes to the driver only. Customers receive nothing from here — just
             the three automated alerts.
           </p>
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onClose}>{sentWarning ? "Close" : "Cancel"}</Button>
           <Button
             variant="primary"
-            icon={pending ? "progress_activity" : "send"}
-            disabled={!canSend || pending}
+            icon={
+              pending
+                ? "progress_activity"
+                : sentWarning
+                  ? "check"
+                  : "send"
+            }
+            disabled={(!canSend || pending) && !sentWarning}
             onClick={() => {
+              if (sentWarning) {
+                // Already sent — this button now just acknowledges the warning.
+                onSend({ channel, to: phone ?? "" });
+                return;
+              }
               setSendError(null);
               startTransition(async () => {
                 const result = await sendDriverRouteMessage({
@@ -359,7 +411,11 @@ export function SendRouteDialog({
                   routeUrl: routeUrl ?? "",
                   previewBody: body,
                 });
-                if (result.ok) {
+                if (result.ok && result.link === "shorten_failed") {
+                  setSentWarning(
+                    `Sent — but the link could not be shortened (${result.linkNote ?? "reason unknown"}), so the driver got the full URL. Fix it in Integrations → Test connections.`,
+                  );
+                } else if (result.ok) {
                   onSend({ channel: result.channel ?? channel, to: phone ?? "" });
                 } else {
                   setSendError(result.message ?? "Could not send the route.");
@@ -369,9 +425,11 @@ export function SendRouteDialog({
           >
             {pending
               ? "Sending…"
-              : phone
-                ? `Send ${channel.toUpperCase()}`
-                : "No driver number"}
+              : sentWarning
+                ? "Done"
+                : phone
+                  ? `Send ${channel.toUpperCase()}`
+                  : "No driver number"}
           </Button>
         </footer>
       </div>

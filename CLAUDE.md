@@ -287,11 +287,14 @@ concatenated SMS is reassembled by the handset from separately delivered parts
 (Short.io, `POST /links`, raw key in `Authorization` — not Bearer) turns it
 into a ~25-character link, called from `sendDriverRouteMessage` just before the
 Sent call. **Best-effort:** no `SHORTIO_API_KEY` / `SHORTIO_DOMAIN`, a bad
-domain, a rate limit or a >4 s response all fall back to the full URL. Only
-links over 100 characters are shortened (a single-destination Waze/Apple link
-is already safe), and `allowDuplicates: false` means a resend of the same route
-reuses the existing short link without spending plan quota. `driver_messages.body`
-records the shortened link that actually went out.
+domain, a rate limit or a >4 s response all fall back to the full URL — but the
+outcome is **reported**, not silent: `SendDriverRouteResult.link` is
+`shortened` / `full_url` / `shorten_failed` (+ `linkNote`), the Send-route
+dialog shows whether the shortener is wired up *before* you send and warns if a
+send fell back, and Test connections always lists Short.io so a missing env var
+is visible. Every route link is shortened (no length threshold);
+`allowDuplicates: false` means a resend reuses the existing short link without
+spending plan quota. `driver_messages.body` records the link that went out.
 
 ## Messaging provider — Sent (sent.dm)
 

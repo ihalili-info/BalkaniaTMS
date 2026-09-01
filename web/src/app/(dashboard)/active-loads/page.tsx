@@ -49,6 +49,7 @@ import {
 import { CUSTOMS_REGIME } from "@/lib/regions";
 
 import { geocodingConfigured } from "@/lib/geocoding/google";
+import { shortioConfigured } from "@/lib/messaging/shortio";
 import { googleMapsKey } from "@/lib/maps.server";
 
 import { DispatchActions } from "./dispatch-actions";
@@ -233,12 +234,14 @@ function LoadCard({
   trucks,
   drivers,
   unassignedOrders,
+  linkShortenerOn,
 }: {
   load: LoadView;
   now: Date;
   trucks: Truck[];
   drivers: Driver[];
   unassignedOrders: Order[];
+  linkShortenerOn: boolean;
 }) {
   const { done, total } = loadProgress(load);
   const nextIndex = load.stops.findIndex((s) => s.delivered_at === null);
@@ -288,7 +291,7 @@ function LoadCard({
             </div>
             <Progress value={done} max={total} tone={done === total ? "ok" : "brand"} />
           </div>
-          <RouteActions load={load} />
+          <RouteActions load={load} linkShortenerOn={linkShortenerOn} />
           <LoadMenu
             load={load}
             trucks={trucks}
@@ -403,6 +406,7 @@ export default async function ActiveLoadsPage() {
   ]);
   const onALoad = new Set(loads.flatMap((l) => l.stops.map((s) => s.order_id)));
   const unassignedOrders = orders.filter((o) => !onALoad.has(o.id));
+  const linkShortenerOn = shortioConfigured();
 
   const stopsRemaining = activeLoads.reduce(
     (n, l) => n + l.stops.filter((s) => s.delivered_at === null).length,
@@ -548,6 +552,7 @@ export default async function ActiveLoadsPage() {
               trucks={trucks}
               drivers={drivers}
               unassignedOrders={unassignedOrders}
+              linkShortenerOn={linkShortenerOn}
             />
           ))}
 
@@ -569,6 +574,7 @@ export default async function ActiveLoadsPage() {
                     trucks={trucks}
                     drivers={drivers}
                     unassignedOrders={unassignedOrders}
+                    linkShortenerOn={linkShortenerOn}
                   />
                 ))}
               </div>

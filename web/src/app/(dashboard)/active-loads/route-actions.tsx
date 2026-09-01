@@ -12,7 +12,13 @@ import { SendRouteDialog } from "./send-route-dialog";
  * "Send route" for one load. Small on purpose — it keeps the load card itself
  * a server component, and only this button and its dialog ship to the browser.
  */
-export function RouteActions({ load }: { load: LoadView }) {
+export function RouteActions({
+  load,
+  linkShortenerOn,
+}: {
+  load: LoadView;
+  linkShortenerOn: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [sent, setSent] = useState<{ channel: Channel; to: string } | null>(
     null,
@@ -44,6 +50,7 @@ export function RouteActions({ load }: { load: LoadView }) {
       {open ? (
         <SendRouteDialog
           load={load}
+          linkShortenerOn={linkShortenerOn}
           onClose={() => setOpen(false)}
           onSend={({ channel, to }) => {
             // The dialog itself already called sendDriverRouteMessage and

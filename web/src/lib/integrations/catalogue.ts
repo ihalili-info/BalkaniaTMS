@@ -229,7 +229,7 @@ export const CONNECTORS: Connector[] = [
     envVars: ["SHORTIO_API_KEY", "SHORTIO_DOMAIN"],
     secrets: ["SHORTIO_API_KEY"],
     endpoint: "POST https://api.short.io/links",
-    note: "Auth is the raw API key in the `Authorization` header (not Bearer). `SHORTIO_DOMAIN` is the short domain links are created under — a custom domain or the plan's `*.short.gy` subdomain — and must already exist in the account. Re-shortening a URL that is already in the account returns the existing link without spending quota, so resends are free; only links over 100 characters are shortened.",
+    note: "Auth is the raw API key in the `Authorization` header (not Bearer). `SHORTIO_DOMAIN` is the short domain links are created under — a custom domain or the plan's `*.short.gy` subdomain — and must already exist in the account. Every route link is shortened; re-shortening a URL already in the account returns the existing link without spending quota, so resends are free. Run Test connections after setting it — the driver SMS still carrying the long URL means one of the two values is wrong.",
     fields: [],
   },
   {

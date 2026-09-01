@@ -39,6 +39,15 @@ export interface SendDriverRouteResult {
   ok: boolean;
   message: string | null;
   channel: Channel | null;
+  /**
+   * What happened to the navigation link.
+   *   "shortened"      — a short.io link went out
+   *   "full_url"       — short.io isn't configured; the full URL went out
+   *   "shorten_failed" — short.io is configured but the call failed; the full
+   *                      URL went out. `linkNote` says why.
+   */
+  link: "shortened" | "full_url" | "shorten_failed";
+  linkNote: string | null;
 }
 
 /** Reads the Sent connector's saved config, falling back to its catalogue defaults. */
@@ -63,9 +72,16 @@ async function loadSentTemplateId(
 export async function sendDriverRouteMessage(
   input: SendDriverRouteInput,
 ): Promise<SendDriverRouteResult> {
+  // Default: no shortener wired up, so the full URL goes out. Narrowed below.
+  let linkOutcome: Pick<SendDriverRouteResult, "link" | "linkNote"> = {
+    link: "full_url",
+    linkNote: null,
+  };
+
   try {
     const user = await getCurrentUser();
-    if (!user) return { ok: false, message: "Not signed in.", channel: null };
+    if (!user)
+      return { ok: false, message: "Not signed in.", channel: null, ...linkOutcome };
 
     const sentConfig = readSentConfig();
     if (!sentConfig) {
@@ -73,6 +89,7 @@ export async function sendDriverRouteMessage(
         ok: false,
         message: "Sent is not configured — SENT_DM_API_KEY is not set.",
         channel: null,
+        ...linkOutcome,
       };
     }
 
@@ -83,13 +100,15 @@ export async function sendDriverRouteMessage(
         message:
           "No driver route template is set on Integration Settings → Sent.",
         channel: null,
+        ...linkOutcome,
       };
     }
 
     // Shorten the navigation link before it goes out. A multi-stop Google Maps
     // URL is ~500 chars, which fragments the SMS — and a dropped fragment
     // leaves the driver with a dead, truncated link. Best-effort: if short.io
-    // is not configured or the call fails, the full URL is sent instead.
+    // is not configured or the call fails, the full URL is sent instead — and
+    // `linkOutcome` records which, so the dispatcher is told.
     let routeUrl = input.routeUrl;
     let storedBody = input.previewBody;
     const shortio = readShortioConfig();
@@ -99,6 +118,9 @@ export async function sendDriverRouteMessage(
         // Keep the audit-trail body in step with what actually went out.
         storedBody = storedBody.split(input.routeUrl).join(short.url);
         routeUrl = short.url;
+        linkOutcome = { link: "shortened", linkNote: null };
+      } else {
+        linkOutcome = { link: "shorten_failed", linkNote: short.reason };
       }
     }
 
@@ -142,6 +164,7 @@ export async function sendDriverRouteMessage(
           ? `Sent, but the record could not be saved: ${insertError.message}`
           : insertError.message,
         channel: sentChannel,
+        ...linkOutcome,
       };
     }
 
@@ -151,8 +174,14 @@ export async function sendDriverRouteMessage(
       ok: result.ok,
       message: result.ok ? null : (result.error ?? "Sent refused the message."),
       channel: sentChannel,
+      ...linkOutcome,
     };
   } catch (e) {
-    return { ok: false, message: (e as Error).message, channel: null };
+    return {
+      ok: false,
+      message: (e as Error).message,
+      channel: null,
+      ...linkOutcome,
+    };
   }
 }

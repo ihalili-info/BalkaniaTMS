@@ -25,12 +25,13 @@ import "server-only";
 const API_BASE = "https://api.short.io";
 
 /**
- * Below this length, shortening spends quota to save little: a single-
- * destination Waze or Apple Maps link is already short enough not to fragment
- * an SMS. The long Google Maps multi-stop link — the one that actually breaks —
- * is far above it.
+ * Only skip shortening for something that is not a real link. Every navigation
+ * URL — even a single-destination one at ~90 characters — is worth shortening:
+ * once the wrapper text ("Dear Driver…", the sign-off) is added, even that
+ * tips the SMS into a second segment, and a two-part SMS can still arrive with
+ * a part missing.
  */
-const MIN_LENGTH_TO_SHORTEN = 100;
+const MIN_LENGTH_TO_SHORTEN = 30;
 
 /** A slow shortener must not stall the send. */
 const TIMEOUT_MS = 4000;
@@ -60,18 +61,21 @@ export interface ShortenOutcome {
   /** The short URL on success, otherwise the original untouched. */
   url: string;
   shortened: boolean;
+  /** Why it was not shortened, when it was attempted and failed. */
+  reason: string | null;
 }
 
 /**
  * Shortens one URL. Always returns a usable URL — the original when shortening
- * was skipped (already short) or failed for any reason.
+ * was skipped (not a real link) or failed for any reason, with `reason` set so
+ * the caller can tell the dispatcher what went wrong.
  */
 export async function shortenUrl(
   config: ShortioConfig,
   originalURL: string,
 ): Promise<ShortenOutcome> {
   if (originalURL.length < MIN_LENGTH_TO_SHORTEN) {
-    return { url: originalURL, shortened: false };
+    return { url: originalURL, shortened: false, reason: null };
   }
 
   const controller = new AbortController();
@@ -92,19 +96,37 @@ export async function shortenUrl(
       cache: "no-store",
       signal: controller.signal,
     });
-    if (!response.ok) return { url: originalURL, shortened: false };
 
     const body = (await response.json().catch(() => ({}))) as {
       shortURL?: string;
       secureShortURL?: string;
+      error?: string;
+      message?: string;
     };
+
+    if (!response.ok) {
+      const detail = body.error ?? body.message ?? `HTTP ${response.status}`;
+      return {
+        url: originalURL,
+        shortened: false,
+        reason:
+          response.status === 401
+            ? "short.io rejected SHORTIO_API_KEY"
+            : `short.io: ${detail}`,
+      };
+    }
+
     const short = body.secureShortURL ?? body.shortURL ?? null;
     return short
-      ? { url: short, shortened: true }
-      : { url: originalURL, shortened: false };
-  } catch {
-    // Timeout, network, non-JSON body — all fall back to the full URL.
-    return { url: originalURL, shortened: false };
+      ? { url: short, shortened: true, reason: null }
+      : { url: originalURL, shortened: false, reason: "short.io returned no link" };
+  } catch (e) {
+    const aborted = e instanceof Error && e.name === "AbortError";
+    return {
+      url: originalURL,
+      shortened: false,
+      reason: aborted ? "short.io did not respond in time" : "could not reach short.io",
+    };
   } finally {
     clearTimeout(timer);
   }

@@ -135,17 +135,26 @@ export async function testConnections(): Promise<ConnectionTestResult[]> {
     });
   }
 
-  // Short.io is optional — only report it when it has been wired up, the same
-  // way Reveal / Geotab / geocoding are left out rather than shown as failing.
+  // Short.io: always reported, because "the driver SMS still has the long URL"
+  // is the exact symptom of it not being set up, and the dispatcher needs to
+  // see which half is missing.
   const shortioConfig = readShortioConfig();
-  if (shortioConfig) {
+  if (!shortioConfig) {
+    results.push({
+      id: "shortio",
+      name: "Short.io link shortener",
+      ok: false,
+      message:
+        "Not set — add SHORTIO_API_KEY and SHORTIO_DOMAIN. Until then driver route links are sent in full.",
+    });
+  } else {
     const check = await verifyShortioConnection(shortioConfig);
     results.push({
       id: "shortio",
       name: "Short.io link shortener",
       ok: check.ok,
       message: check.ok
-        ? "Key is valid and the domain matches."
+        ? "Key is valid and the domain matches — links will be shortened."
         : (check.error ?? `Request failed (${check.status}).`),
     });
   }
