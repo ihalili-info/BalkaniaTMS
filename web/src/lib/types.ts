@@ -138,6 +138,12 @@ export interface Order {
   /** ePrivacy: a STOP reply. Nothing may be sent while this is true. */
   notifications_opt_out: boolean;
   opted_out_at: string | null;
+
+  /**
+   * Vehicle assigned to this order in the source CRM (migration 0016), free
+   * text. Reference only — `loads.truck_id` is the TMS's own dispatch plan.
+   */
+  crm_vehicle: string | null;
 }
 
 export interface Load {

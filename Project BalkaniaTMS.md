@@ -112,6 +112,9 @@ CREATE TABLE orders (
   delivery_address TEXT NOT NULL,
   delivery_location GEOGRAPHY(POINT, 4326),
   status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'assigned', 'en_route', 'delivered')),
+  -- migration 0016: the vehicle the source CRM assigned to this order, free
+  -- text, reference only. Distinct from loads.truck_id (the TMS's own plan).
+  crm_vehicle TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

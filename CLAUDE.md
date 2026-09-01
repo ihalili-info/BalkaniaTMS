@@ -61,6 +61,10 @@ keep it and `supabase/migrations/` in sync.
     diagnostic log of every CRM ingestion push to `/api/webhooks/crm`
     (`action`, `outcome`, `reason`, and the raw `payload` on failure only).
     Same shape and retention posture as `gps_webhook_deliveries` (0009).
+  - `0016_order_vehicle.sql` — `orders.crm_vehicle`: the vehicle the source
+    CRM assigned to an order, free text, reference only. Distinct from
+    `loads.truck_id` (the TMS's own plan). Surfaced through `orders_geo` and
+    the Orders Queue "Vehicle" column; populated by the CRM bridge.
 - `web/` — Next.js 16 (App Router, TypeScript, Tailwind v4) admin panel. See
   [web/README.md](web/README.md) for its layout and conventions.
   - `src/app/globals.css` — the entire design system as Tailwind v4 `@theme` tokens

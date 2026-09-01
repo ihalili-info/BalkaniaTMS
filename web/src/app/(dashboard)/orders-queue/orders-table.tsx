@@ -85,7 +85,8 @@ export function OrdersTable({
         o.customer_name.toLowerCase().includes(q) ||
         o.crm_order_id.toLowerCase().includes(q) ||
         o.delivery_address.toLowerCase().includes(q) ||
-        (o.delivery_postcode ?? "").toLowerCase().includes(q)
+        (o.delivery_postcode ?? "").toLowerCase().includes(q) ||
+        (o.crm_vehicle ?? "").toLowerCase().includes(q)
       );
     });
   }, [orders, filter, query]);
@@ -133,7 +134,7 @@ export function OrdersTable({
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Filter by customer, CRM id, address or postcode"
+            placeholder="Filter by customer, CRM id, address, postcode or vehicle"
             className="w-full bg-transparent text-body-sm outline-none placeholder:text-ink-subtle"
           />
         </label>
@@ -224,6 +225,7 @@ export function OrdersTable({
               <Th>Delivery address</Th>
               <Th>Destination</Th>
               <Th>Status</Th>
+              <Th>Vehicle</Th>
               <Th>Load</Th>
               <Th className="text-right">Received</Th>
             </tr>
@@ -305,6 +307,12 @@ export function OrdersTable({
                         </Badge>
                       ) : null}
                     </div>
+                  </Td>
+                  <Td
+                    className="font-mono text-data-sm text-ink-muted"
+                    title={order.crm_vehicle ? "Vehicle assigned in the CRM — reference only" : undefined}
+                  >
+                    {order.crm_vehicle ?? "—"}
                   </Td>
                   <Td className="font-mono text-data-sm text-ink-muted">
                     {ref ?? "—"}

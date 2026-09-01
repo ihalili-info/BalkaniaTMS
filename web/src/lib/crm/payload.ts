@@ -35,6 +35,8 @@
  *     "promised_at":           "2026-09-01T14:00:00Z",   // optional, ISO 8601
  *     "promised_window_end":   "2026-09-01T16:00:00Z",   // optional, ISO 8601
  *     "notifications_opt_out": false,                    // optional, default false
+ *     "vehicle":               "24-D-11234",             // optional, free text —
+ *                                                        //   the CRM's own vehicle
  *     "cancelled":             false                     // optional; true removes
  *   }                                                    //   a still-pending order
  *
@@ -67,6 +69,7 @@ export interface CrmOrderInput {
   promised_at?: unknown;
   promised_window_end?: unknown;
   notifications_opt_out?: unknown;
+  vehicle?: unknown;
   cancelled?: unknown;
 }
 
@@ -91,6 +94,8 @@ export interface NormalisedCrmOrder {
   promisedAt: string | null;
   promisedWindowEnd: string | null;
   notificationsOptOut: boolean;
+  /** The CRM's own assigned vehicle, free text. Reference only. */
+  vehicle: string | null;
 }
 
 export interface ParsedCrmOrder {
@@ -199,6 +204,7 @@ export function parseCrmOrder(raw: CrmOrderInput): ParsedCrmOrder {
   }
 
   const cancelled = asBool(raw.cancelled) === true;
+  const vehicle = asString(raw.vehicle) || null;
 
   // --- country (needed for postcode + phone checks below) ---
   let deliveryCountry: CountryCode = HOME_COUNTRY;
@@ -239,6 +245,7 @@ export function parseCrmOrder(raw: CrmOrderInput): ParsedCrmOrder {
             promisedAt: null,
             promisedWindowEnd: null,
             notificationsOptOut: false,
+            vehicle,
           },
     };
   }
@@ -333,6 +340,7 @@ export function parseCrmOrder(raw: CrmOrderInput): ParsedCrmOrder {
           promisedAt: promised.value,
           promisedWindowEnd: promisedEnd.value,
           notificationsOptOut: optOut ?? false,
+          vehicle,
         },
   };
 }

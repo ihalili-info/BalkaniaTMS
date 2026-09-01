@@ -31,7 +31,8 @@ export type FieldId =
   | "delivery_country"
   | "latitude"
   | "longitude"
-  | "notifications_opt_out";
+  | "notifications_opt_out"
+  | "crm_vehicle";
 
 export interface FieldSpec {
   id: FieldId;
@@ -112,6 +113,13 @@ export const IMPORT_FIELDS: FieldSpec[] = [
     required: false,
     hint: "yes / true / 1 marks a customer who has opted out.",
     aliases: ["notifications_opt_out", "opt out", "opt_out", "no alerts", "do not contact", "unsubscribed"],
+  },
+  {
+    id: "crm_vehicle",
+    label: "Vehicle",
+    required: false,
+    hint: "The vehicle the CRM assigned to this order. Free text, reference only.",
+    aliases: ["crm_vehicle", "vehicle", "truck", "reg", "registration", "van", "vehicle reg"],
   },
 ];
 
@@ -345,6 +353,7 @@ export function validateRows(
             delivery_postcode: postcode,
             notifications_opt_out: optOut ?? false,
             opted_out_at: optOut ? nowIso : null,
+            crm_vehicle: values.crm_vehicle || null,
           },
     };
   });
@@ -387,6 +396,7 @@ export function templateRows(): string[][] {
       "",
       "",
       "no",
+      "24-D-11234",
     ],
     [
       "CRM-24302",
@@ -399,6 +409,7 @@ export function templateRows(): string[][] {
       "54.6210",
       "-5.9100",
       "no",
+      "",
     ],
   ];
 }

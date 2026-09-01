@@ -376,6 +376,7 @@ export async function POST(request: Request) {
           promised_window_end: o.promisedWindowEnd,
           notifications_opt_out: o.notificationsOptOut,
           opted_out_at: o.notificationsOptOut ? new Date().toISOString() : null,
+          crm_vehicle: o.vehicle,
         })
         .select("id")
         .single();
@@ -426,6 +427,7 @@ export async function POST(request: Request) {
         opted_out_at: o.notificationsOptOut
           ? new Date().toISOString()
           : null,
+        crm_vehicle: o.vehicle,
         updated_at: new Date().toISOString(),
       })
       .eq("id", existing.id);
