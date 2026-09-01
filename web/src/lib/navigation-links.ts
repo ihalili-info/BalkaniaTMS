@@ -55,8 +55,17 @@ export const NAV_TARGETS: Record<NavApp, NavTarget> = {
   },
 };
 
-/** Google caps `waypoints` at nine intermediate points. */
+/**
+ * Google Maps URLs cap `waypoints` at **nine** intermediate points — so ten
+ * stops per link (nine waypoints + the destination), and only three on a
+ * mobile browser. This is a hard limit of the *URL scheme*: it is not raised
+ * by an API key (Maps URLs take none) and is unrelated to the Routes API's
+ * server-side waypoint limit. A longer route is delivered in parts — the
+ * driver runs these ten, they get marked delivered, and "Send route" again
+ * produces a link for what is left.
+ */
 export const GOOGLE_MAX_WAYPOINTS = 9;
+export const GOOGLE_MAX_STOPS = GOOGLE_MAX_WAYPOINTS + 1;
 
 const coord = (p: LatLng) => `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`;
 
@@ -76,8 +85,12 @@ export function navigationUrl(app: NavApp, route: RouteRequest): string | null {
   if (stops.length === 0) return null;
 
   if (app === "google") {
-    const destination = stops[stops.length - 1];
-    const waypoints = stops.slice(0, -1).slice(0, GOOGLE_MAX_WAYPOINTS);
+    // Take the first ten stops **in delivery order**. The old code kept the
+    // first nine waypoints but jumped the destination to the *last* stop,
+    // silently skipping everything between stop 9 and the end.
+    const covered = stops.slice(0, GOOGLE_MAX_STOPS);
+    const destination = covered[covered.length - 1];
+    const waypoints = covered.slice(0, -1);
     const params = new URLSearchParams({
       api: "1",
       destination: coord(destination),
@@ -108,7 +121,7 @@ export function navigationUrl(app: NavApp, route: RouteRequest): string | null {
 export function stopsCovered(app: NavApp, stopCount: number): number {
   if (stopCount === 0) return 0;
   if (app !== "google") return 1;
-  return Math.min(stopCount, GOOGLE_MAX_WAYPOINTS + 1);
+  return Math.min(stopCount, GOOGLE_MAX_STOPS);
 }
 
 /**

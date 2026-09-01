@@ -63,7 +63,7 @@ export const ROUTING_MESSAGE: Record<RoutingFailure, string> = {
   denied:
     "Google refused the Routes request — the key is not enabled for the Routes API, or is referrer-restricted. A server-side key must have no referrer restriction.",
   invalid_request:
-    "Google rejected the Routes request (HTTP 400). Check that the Routes API is enabled on the key's project; see the server log for the exact reason.",
+    "Google rejected the Routes request as malformed (HTTP 400) — a bad coordinate or request body, not a key problem (that is a 403). The exact reason is in the server log.",
   network: "Could not reach Google Routes.",
   bad_response: "Google Routes returned something unparseable.",
 };
@@ -82,10 +82,21 @@ function routingKey(): string | null {
 
 export type { RouteLeg };
 
-function point(p: LatLng) {
-  return {
-    waypoint: { location: { latLng: { latitude: p.lat, longitude: p.lng } } },
-  };
+/**
+ * A bare `Waypoint` — what `computeRoutes` wants for `origin` / `destination`.
+ */
+function waypoint(p: LatLng) {
+  return { location: { latLng: { latitude: p.lat, longitude: p.lng } } };
+}
+
+/**
+ * A `RouteMatrixOrigin` / `RouteMatrixDestination` — `computeRouteMatrix`
+ * wraps the same `Waypoint` in a `{ waypoint }` object (and the origin form
+ * also carries `routeModifiers`). This is **not** interchangeable with the
+ * bare waypoint above: sending `{ waypoint: … }` to `computeRoutes` is a 400.
+ */
+function matrixPoint(p: LatLng) {
+  return { waypoint: waypoint(p) };
 }
 
 /** `"1234s"` → `1234`. The Routes API serialises every duration this way. */
@@ -131,8 +142,8 @@ export async function routeLeg(
   if (!key) return { leg: null, failure: "not_configured" };
 
   const body: Record<string, unknown> = {
-    origin: point(from),
-    destination: point(to),
+    origin: waypoint(from),
+    destination: waypoint(to),
     travelMode: "DRIVE",
     routingPreference: trafficAware ? "TRAFFIC_AWARE" : "TRAFFIC_UNAWARE",
     // Ferries are part of a real answer for this fleet (Dublin–Holyhead), so
@@ -243,8 +254,8 @@ export async function routeMatrix(
           // computeRouteMatrix takes no top-level routeModifiers — that field
           // lives inside each origin. Ferries are allowed by default, which is
           // what this fleet wants, so nothing extra is needed.
-          origins: block.map(point),
-          destinations: destinations.map(point),
+          origins: block.map(matrixPoint),
+          destinations: destinations.map(matrixPoint),
           travelMode: "DRIVE",
           routingPreference: "TRAFFIC_UNAWARE",
         }),

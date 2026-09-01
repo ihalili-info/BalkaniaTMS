@@ -269,6 +269,18 @@ export function SendRouteDialog({
                 coordinates and cannot be routed to. Geocode them first.
               </p>
             ) : null}
+
+            {stopsCovered("google", geocodedCount) < geocodedCount ? (
+              <p className="mt-2 flex items-start gap-1.5 rounded-sm border border-warn-border bg-warn-soft px-3 py-2 text-caption text-ink-muted">
+                <Icon name="alt_route" className="mt-px text-[14px] text-warn" />
+                <span>
+                  Google Maps links carry <strong>10 stops</strong> maximum. This
+                  one covers stops 1&ndash;{stopsCovered("google", geocodedCount)} of{" "}
+                  {geocodedCount}. Once those are delivered, open this dialog
+                  again for a link to the rest.
+                </span>
+              </p>
+            ) : null}
           </section>
 
           <section>

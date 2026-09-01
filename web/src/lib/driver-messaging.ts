@@ -6,7 +6,7 @@
  * header comment on migration 0005.
  */
 
-import { NAV_TARGETS, type NavApp } from "./navigation-links";
+import { NAV_TARGETS, stopsCovered, type NavApp } from "./navigation-links";
 import type { Driver, LoadView, Stop } from "./types";
 
 /** Matches the driver_messages CHECK; RCS added in migration 0007. */
@@ -56,14 +56,29 @@ export function routeMessage({
     );
   }
 
+  let truncated = false;
   for (const app of apps) {
     const url = urls[app];
     if (!url) continue;
     const target = NAV_TARGETS[app];
-    const scope = target.multiStop
-      ? `all ${remaining.length}`
-      : "next stop only";
+    const covered = stopsCovered(app, remaining.length);
+    let scope: string;
+    if (!target.multiStop) {
+      scope = "next stop only";
+    } else if (covered >= remaining.length) {
+      scope = `all ${remaining.length}`;
+    } else {
+      scope = `stops 1-${covered} of ${remaining.length}`;
+      truncated = true;
+    }
     lines.push(`${target.label} (${scope}): ${url}`);
+  }
+
+  if (truncated) {
+    const covered = stopsCovered("google", remaining.length);
+    lines.push(
+      `This link covers the first ${covered} of ${remaining.length} stops - Google Maps takes no more per link.`,
+    );
   }
 
   return lines.join("\n");

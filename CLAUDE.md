@@ -269,7 +269,16 @@ phone number is still personal data and the retention window still applies.
 Maps. The three are **not** equivalent and the UI must not imply they are:
 
 - **Google Maps** is the only one with a documented multi-stop URL
-  (`waypoints=`, nine intermediate stops max).
+  (`waypoints=`, **nine** intermediate stops max — ten stops per link, and
+  only three on a mobile browser). This is a hard limit of the URL scheme, not
+  something an API key raises (Maps URLs take none); the Routes API's larger
+  waypoint limit is a different thing entirely. `navigationUrl("google", …)`
+  takes the first ten stops **in delivery order** — an earlier version kept the
+  first nine and jumped the destination to the *last* stop, dropping everything
+  between. A route longer than ten stops goes out in parts: the driver runs
+  these ten, they are marked delivered (geofence or by hand), and "Send route"
+  again produces a link for what remains. The dialog and the message preview
+  both say "stops 1–10 of N" when truncated rather than "all N".
 - **Waze** and **Apple Maps** take one destination. They get the *next* stop,
   never the last — a driver navigating straight to the final drop would skip
   everything in between. Each link is labelled with how many stops it covers.
@@ -665,6 +674,16 @@ tracker — `trk-06` in the fixtures is deliberately both.
 `haversineMeters` on any failure** — no key, spent quota or a network blip
 must never break auto-plan or the load board, it just drops to straight-line
 maths with the UI saying so.
+
+- **The two endpoints want different point shapes** and it is silent when
+  wrong. `computeRoutes` (`routeLeg`) takes a bare `Waypoint` for
+  `origin`/`destination` (`waypoint(p)` → `{ location: { latLng } }`);
+  `computeRouteMatrix` (`routeMatrix`) wraps it — `matrixPoint(p)` →
+  `{ waypoint: { location: { latLng } } }`. Sending the wrapped form to
+  `computeRoutes` is a **400**, which the degrade path swallows into
+  straight-line ETAs — so a broken `routeLeg` looks like "routing just isn't
+  configured". A 400 here is a malformed body, **not** a key/enablement
+  problem (that is a 403 → `denied`).
 
 - **`travelMode: "DRIVE"` is a car.** Google Routes has no HGV profile, so it
   ignores the 4.0 m bridge, the weight limit and ADR. `truckRoutingWarning()`
