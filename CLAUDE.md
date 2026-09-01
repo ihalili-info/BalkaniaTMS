@@ -313,16 +313,14 @@ Behaviours that differ from a Twilio-shaped API, and two of them cost money:
 RCS is a first-class channel alongside SMS and WhatsApp (migration 0007 widened
 the `driver_messages.channel` CHECK to match).
 
-**Inbound webhook signatures are verified**, and the scheme is no longer a
-guess: strip `whsec_` from the secret, base64-decode the rest as the HMAC key,
-and compare `HMAC-SHA256("{X-Webhook-ID}.{X-Webhook-Timestamp}.{rawBody}")`
-against the `v1,{base64}` signature header, rejecting anything more than five
-minutes old. `rawBody` must be the **exact bytes received** — a parse/stringify
-round trip reorders keys and can never match.
-
-**Still unverified:** the `x-profile-id` sender-profile header. The
-authentication reference says the key alone identifies the caller, so it is
-probably unnecessary; it is sent only when `SENT_PROFILE_ID` is set.
+**`SENT_DM_API_KEY` is the only Sent credential.** Confirmed against the live
+account: sending works on the `x-api-key` header alone — no `x-profile-id`
+sender-profile header (`SENT_PROFILE_ID` is gone). Inbound delivery-status
+receipts are not consumed — there is no route and `driver_messages.status` is
+set only at send time — so the signature verifier and `SENT_WEBHOOK_SECRET`
+were removed rather than shipped unwired. If receipts are wanted later, re-add
+the `whsec_` HMAC scheme (SHA-256 over `{id}.{timestamp}.{rawBody}`, exact
+received bytes, five-minute replay window) together with the route.
 
 ## Order intake
 
@@ -398,6 +396,16 @@ profile — and no profile means no role means locked out.
 
 Nobody may edit their own `role`: the `profiles_update_self` policy pins it to
 the existing value, otherwise every restriction would be voluntary.
+
+**Account page** (`/account`, `app/(dashboard)/account/`) — the only
+self-service edits: `profiles.full_name` and the Supabase Auth password.
+`lib/auth/account-actions.ts`. Both re-read the session; the name update
+relies on `profiles_update_self` (role stays put, so the policy's WITH CHECK
+passes) and also mirrors the name into auth metadata. The password change
+**verifies the current password first** with a throwaway `signInWithPassword`,
+because `updateUser({ password })` alone does not — a stolen session would
+otherwise reset it silently. `role`, `email` and `depot` are shown read-only
+and stay admin-managed. Reached from the user chip in the nav rail.
 
 The sidebar's role switcher is **demo-only** and disappears with Supabase Auth —
 a real user cannot pick their own role. It writes the same cookie every guard

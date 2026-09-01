@@ -1,12 +1,11 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
-
 /**
  * Sent (sent.dm) — the messaging provider.
  *
  * `POST https://api.sent.dm/v3/messages`, authenticated with an **`x-api-key`**
- * header holding a UUID. Sent's own reference is explicit that this is
- * header-key auth and *not* `Authorization: Bearer`, and that "no other
- * identifier is required" — so `x-profile-id` is not needed for a normal key.
+ * header holding a UUID, and nothing else. Sent's own reference is explicit
+ * that this is header-key auth and *not* `Authorization: Bearer`, and that "no
+ * other identifier is required" — confirmed against this account: sending works
+ * on the API key alone, with no `x-profile-id` sender-profile header.
  *
  * Three things about this API are easy to get wrong:
  *
@@ -56,21 +55,12 @@ export type DeliveryPreference = "auto" | SentChannel[];
 
 export interface SentConfig {
   apiKey: string;
-  /**
-   * Sender Profile, sent as `x-profile-id`.
-   *
-   * The authentication reference says the key alone identifies the caller, so
-   * this is almost certainly unnecessary. Kept because organisation-level keys
-   * are described elsewhere in the docs as needing a profile — send it only if
-   * the account actually requires it.
-   */
-  profileId?: string;
 }
 
 export function readConfig(): SentConfig | null {
   const apiKey = process.env.SENT_DM_API_KEY;
   if (!apiKey) return null;
-  return { apiKey, profileId: process.env.SENT_PROFILE_ID };
+  return { apiKey };
 }
 
 export interface SendMessageInput {
@@ -181,7 +171,6 @@ export async function sendMessage(
     "x-api-key": config.apiKey,
     "Content-Type": "application/json",
   };
-  if (config.profileId) headers["x-profile-id"] = config.profileId;
   if (input.idempotencyKey) headers["Idempotency-Key"] = input.idempotencyKey;
 
   let response: Response;
@@ -263,112 +252,12 @@ export async function verifyConnection(
   }
 }
 
-/* --- inbound webhooks -------------------------------------------------------- */
-
-export const WEBHOOK_HEADERS = {
-  id: "x-webhook-id",
-  timestamp: "x-webhook-timestamp",
-  signature: "x-webhook-signature",
-  eventType: "x-webhook-event-type",
-} as const;
-
-/** Replay window. Sent's own guidance is five minutes. */
-const MAX_SKEW_SECONDS = 300;
-
-export type WebhookVerdict =
-  | { valid: true }
-  | { valid: false; reason: string };
-
-/**
- * Verifies a delivery-status webhook.
+/* --- inbound webhooks ------------------------------------------------------
  *
- * The scheme, from Sent's docs: strip the `whsec_` prefix from the signing
- * secret and base64-decode the rest to get the raw HMAC key, then compute
- * `HMAC-SHA256("{id}.{timestamp}.{rawBody}")` and compare against the
- * `v1,{base64}` value in the signature header.
- *
- * Two details that are easy to get wrong and both defeat the point:
- *
- * - **The raw body must be the exact bytes received.** `JSON.parse` then
- *   `JSON.stringify` reorders keys and changes whitespace, and the signature
- *   will never match. Read the body as text first.
- * - **The timestamp check is not optional here.** Without it a valid signed
- *   delivery receipt can be replayed forever, so a message could be flipped
- *   back to "delivered" long after it failed.
+ * Sent can POST delivery-status receipts, signed with a `whsec_`-prefixed
+ * secret (HMAC-SHA256 over `{id}.{timestamp}.{rawBody}`, `v1,{base64}` header,
+ * five-minute replay window). Nothing consumes them yet — there is no route
+ * and `driver_messages.status` is only ever set at send time — so the
+ * verifier and `SENT_WEBHOOK_SECRET` were removed rather than shipped unwired.
+ * Re-add both together when receipts are actually wanted.
  */
-export function verifyWebhookSignature({
-  secret,
-  webhookId,
-  timestamp,
-  rawBody,
-  signatureHeader,
-  now = new Date(),
-}: {
-  /** `SENT_WEBHOOK_SECRET`, as shown in the dashboard, with its `whsec_` prefix. */
-  secret: string;
-  webhookId: string | null;
-  timestamp: string | null;
-  /** The body exactly as received, before any parsing. */
-  rawBody: string;
-  signatureHeader: string | null;
-  now?: Date;
-}): WebhookVerdict {
-  if (!webhookId || !timestamp || !signatureHeader) {
-    return { valid: false, reason: "missing webhook id, timestamp or signature" };
-  }
-
-  const sent = Number.parseInt(timestamp, 10);
-  if (!Number.isFinite(sent)) {
-    return { valid: false, reason: "timestamp is not a unix time" };
-  }
-  const skew = Math.abs(Math.floor(now.getTime() / 1000) - sent);
-  if (skew > MAX_SKEW_SECONDS) {
-    return { valid: false, reason: `timestamp is ${skew}s out — replay refused` };
-  }
-
-  const raw = secret.startsWith("whsec_") ? secret.slice("whsec_".length) : secret;
-  let key: Buffer;
-  try {
-    key = Buffer.from(raw, "base64");
-  } catch {
-    return { valid: false, reason: "signing secret is not base64" };
-  }
-  if (key.length === 0) {
-    return { valid: false, reason: "signing secret decoded to nothing" };
-  }
-
-  const expected = createHmac("sha256", key)
-    .update(`${webhookId}.${timestamp}.${rawBody}`)
-    .digest();
-
-  // The header may carry several space-separated versions during a key
-  // rotation. Any one matching is a pass.
-  for (const candidate of signatureHeader.split(" ")) {
-    const [version, value] = candidate.split(",");
-    if (version !== "v1" || !value) continue;
-    const given = Buffer.from(value, "base64");
-    if (given.length !== expected.length) continue;
-    if (timingSafeEqual(given, expected)) return { valid: true };
-  }
-
-  return { valid: false, reason: "no signature matched" };
-}
-
-/** Sent's status vocabulary mapped onto `driver_messages.status`. */
-export function normaliseStatus(
-  providerStatus: string | undefined,
-): "queued" | "sent" | "delivered" | "undelivered" | "failed" {
-  switch (providerStatus?.toUpperCase()) {
-    case "QUEUED":
-    case "ACCEPTED":
-      return "queued";
-    case "SENT":
-      return "sent";
-    case "DELIVERED":
-      return "delivered";
-    case "UNDELIVERED":
-      return "undelivered";
-    default:
-      return "failed";
-  }
-}

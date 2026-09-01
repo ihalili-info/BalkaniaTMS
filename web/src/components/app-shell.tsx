@@ -174,23 +174,35 @@ function Sidebar({
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-rail-hover text-caption font-medium text-rail-ink-strong">
-            {user.fullName
-              .split(" ")
-              .map((part) => part[0])
-              .slice(0, 2)
-              .join("")}
-          </span>
-          <span className="flex min-w-0 flex-col">
-            <span className="truncate text-body-sm font-medium text-rail-ink-strong">
-              {user.fullName}
+        <div className="flex items-center gap-1">
+          <Link
+            href="/account"
+            aria-current={pathname.startsWith("/account") ? "page" : undefined}
+            title="Account settings"
+            className={cx(
+              "-mx-1 flex min-w-0 flex-1 items-center gap-2.5 rounded-sm px-1 py-1 transition-colors",
+              pathname.startsWith("/account")
+                ? "bg-rail-hover"
+                : "hover:bg-rail-raised",
+            )}
+          >
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-rail-hover text-caption font-medium text-rail-ink-strong">
+              {user.fullName
+                .split(" ")
+                .map((part) => part[0])
+                .slice(0, 2)
+                .join("")}
             </span>
-            <span className="truncate text-caption text-rail-ink/70">
-              {ROLES[user.role].label} · {user.email ?? user.depot}
+            <span className="flex min-w-0 flex-col">
+              <span className="truncate text-body-sm font-medium text-rail-ink-strong">
+                {user.fullName}
+              </span>
+              <span className="truncate text-caption text-rail-ink/70">
+                {ROLES[user.role].label} · {user.email ?? user.depot}
+              </span>
             </span>
-          </span>
-          <form action={signOut} className="ml-auto">
+          </Link>
+          <form action={signOut}>
             <button
               type="submit"
               title="Sign out"

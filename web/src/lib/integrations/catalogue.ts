@@ -163,17 +163,11 @@ export const CONNECTORS: Connector[] = [
       "Customer alerts over SMS, WhatsApp and RCS through one API, with provider-side channel fallback.",
     icon: "sms",
     status: "not_configured",
-    envVars: ["SENT_DM_API_KEY", "SENT_PROFILE_ID", "SENT_WEBHOOK_SECRET"],
-    secrets: ["SENT_DM_API_KEY", "SENT_WEBHOOK_SECRET"],
+    envVars: ["SENT_DM_API_KEY"],
+    secrets: ["SENT_DM_API_KEY"],
     endpoint: "POST https://api.sent.dm/v3/messages",
+    note: "Header-key auth only — `x-api-key: <SENT_DM_API_KEY>`, no sender-profile header and nothing else. Delivery-status receipts are not consumed, so there is no webhook secret.",
     fields: [
-      {
-        key: "profile_id",
-        label: "Sender profile",
-        kind: "text",
-        help: "Sent as x-profile-id. Only needed for organisation-level keys. Not yet verified against the v3 docs.",
-        placeholder: "prof_…",
-      },
       {
         key: "default_channel",
         label: "Delivery channel",
@@ -350,7 +344,6 @@ export const DEFAULT_CONFIG: Record<string, Record<string, string | number | boo
   },
   geotab: { server: "", database: "" },
   sent: {
-    profile_id: "",
     default_channel: "auto",
     retention_days: 90,
     // Seeded with the templates already created in the Sent dashboard, so the
