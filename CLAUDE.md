@@ -421,11 +421,20 @@ the existing value, otherwise every restriction would be voluntary.
 self-service edits: `profiles.full_name` and the Supabase Auth password.
 `lib/auth/account-actions.ts`. Both re-read the session; the name update
 relies on `profiles_update_self` (role stays put, so the policy's WITH CHECK
-passes) and also mirrors the name into auth metadata. The password change
-**verifies the current password first** with a throwaway `signInWithPassword`,
-because `updateUser({ password })` alone does not — a stolen session would
-otherwise reset it silently. `role`, `email` and `depot` are shown read-only
-and stay admin-managed. Reached from the user chip in the nav rail.
+passes) and mirrors the name into auth metadata **best-effort** (that call
+failing must not fail the row write). The password change **verifies the
+current password first** — on an isolated `persistSession:false` client so the
+check does not rotate the user's real session — because `updateUser({ password })`
+alone does not, and a stolen session would otherwise reset it silently.
+`role`, `email` and `depot` are read-only and stay admin-managed.
+
+**Every auth action catches its own throws.** Supabase's write methods
+(`signOut`, `updateUser`, `signInWithPassword`) throw `AuthRetryableFetchError`
+on a network blip and GoTrue rate-limits them hard; an uncaught throw from a
+Server Action hits the root `error.tsx` and drops the whole screen. So the
+account actions return `{ status: "error" }` for the form to render, and
+`signOut` uses `scope: "local"` (no network round trip) inside try/catch and
+redirects regardless.
 
 The sidebar's role switcher is **demo-only** and disappears with Supabase Auth —
 a real user cannot pick their own role. It writes the same cookie every guard

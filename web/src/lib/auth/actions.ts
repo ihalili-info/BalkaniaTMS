@@ -48,8 +48,17 @@ export async function signIn(
 }
 
 export async function signOut(): Promise<void> {
-  const supabase = await createClient();
-  await supabase.auth.signOut();
+  try {
+    const supabase = await createClient();
+    // `scope: "local"` drops this device's session without the network round
+    // trip a global sign-out makes to revoke every session — that call throws
+    // `AuthRetryableFetchError` on a blip, which would turn "log out" into the
+    // root error screen. The local session (the cookies) is cleared either way.
+    await supabase.auth.signOut({ scope: "local" });
+  } catch {
+    // The cookies are already being cleared by the client's setAll; even if
+    // the GoTrue call failed, land the user on sign-in rather than an error.
+  }
   revalidatePath("/", "layout");
   redirect("/sign-in");
 }
