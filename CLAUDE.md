@@ -65,6 +65,12 @@ keep it and `supabase/migrations/` in sync.
     CRM assigned to an order, free text, reference only. Distinct from
     `loads.truck_id` (the TMS's own plan). Surfaced through `orders_geo` and
     the Orders Queue "Vehicle" column; populated by the CRM bridge.
+  - `0017_advisor_fixes.sql` — Security Advisor clean-up: pins
+    `stamp_driver_assignment`'s `search_path`, and takes `handle_new_user` /
+    `current_role_name` / `is_admin` off the anon REST surface (`is_admin` +
+    `current_role_name` stay granted to `authenticated` — the RLS policies
+    call them). The `rls_policy_always_true` and PostGIS-in-`public` findings
+    are assessed-and-left; see the file's footer and "Security Advisor" below.
 - `web/` — Next.js 16 (App Router, TypeScript, Tailwind v4) admin panel. See
   [web/README.md](web/README.md) for its layout and conventions.
   - `src/app/globals.css` — the entire design system as Tailwind v4 `@theme` tokens
@@ -439,6 +445,20 @@ redirects regardless.
 The sidebar's role switcher is **demo-only** and disappears with Supabase Auth —
 a real user cannot pick their own role. It writes the same cookie every guard
 reads, so switching exercises the real path rather than a bypass.
+
+**Security Advisor stance.** The `<table>_authenticated USING (true)` policies
+on the operational tables (trucks, drivers, orders, loads, load_items,
+stop_visits, geocode_cache) trip the `rls_policy_always_true` lint **by
+design** — this is a shared dispatch board for two trusted, admin-provisioned
+staff roles, not a multi-tenant app; there is no per-user row ownership to
+enforce. The controls that carry weight are on `integration_settings` (admin
+only) and `profiles` (own row, `role` pinned). Don't "fix" the always-true
+policies without an actual isolation requirement to implement. The
+PostGIS-in-`public` family of lints (`extension_in_public`, `spatial_ref_sys`
+RLS, `st_estimatedextent`) are dismissed — moving PostGIS out of `public` is
+the only real fix and isn't worth it on a live DB. Migration 0017 handled the
+genuine ones (`search_path`, anon-reachable DEFINER functions). Enable leaked-
+password protection in the Auth dashboard.
 
 ## Analytics honesty
 
