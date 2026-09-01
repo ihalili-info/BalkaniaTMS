@@ -280,6 +280,19 @@ Keep the default SMS body inside GSM-7. A single em dash or accented character
 flips the whole message to UCS-2 and cuts the per-segment budget from 153 to 67
 characters — that alone doubled a route message from 3 segments to 6.
 
+**The navigation link is shortened before it sends.** A multi-stop Google Maps
+URL is ~500 characters; the route SMS then spans four or more segments, and a
+concatenated SMS is reassembled by the handset from separately delivered parts
+— drop one and the driver gets a truncated, dead link. `lib/messaging/shortio.ts`
+(Short.io, `POST /links`, raw key in `Authorization` — not Bearer) turns it
+into a ~25-character link, called from `sendDriverRouteMessage` just before the
+Sent call. **Best-effort:** no `SHORTIO_API_KEY` / `SHORTIO_DOMAIN`, a bad
+domain, a rate limit or a >4 s response all fall back to the full URL. Only
+links over 100 characters are shortened (a single-destination Waze/Apple link
+is already safe), and `allowDuplicates: false` means a resend of the same route
+reuses the existing short link without spending plan quota. `driver_messages.body`
+records the shortened link that actually went out.
+
 ## Messaging provider — Sent (sent.dm)
 
 `POST https://api.sent.dm/v3/messages`, authenticated with an **`x-api-key`**

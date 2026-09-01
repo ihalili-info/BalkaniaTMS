@@ -8,6 +8,7 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { DEFAULT_CONFIG } from "@/lib/integrations/catalogue";
 import { readConfig as readSentConfig, sendMessage } from "@/lib/messaging/sent";
+import { readShortioConfig, shortenUrl } from "@/lib/messaging/shortio";
 import type { Channel } from "@/lib/driver-messaging";
 
 /**
@@ -85,9 +86,25 @@ export async function sendDriverRouteMessage(
       };
     }
 
+    // Shorten the navigation link before it goes out. A multi-stop Google Maps
+    // URL is ~500 chars, which fragments the SMS — and a dropped fragment
+    // leaves the driver with a dead, truncated link. Best-effort: if short.io
+    // is not configured or the call fails, the full URL is sent instead.
+    let routeUrl = input.routeUrl;
+    let storedBody = input.previewBody;
+    const shortio = readShortioConfig();
+    if (shortio && routeUrl) {
+      const short = await shortenUrl(shortio, routeUrl);
+      if (short.shortened) {
+        // Keep the audit-trail body in step with what actually went out.
+        storedBody = storedBody.split(input.routeUrl).join(short.url);
+        routeUrl = short.url;
+      }
+    }
+
     const result = await sendMessage(sentConfig, {
       to: [input.toPhone],
-      template: { id: templateId, parameters: { routeURL: input.routeUrl } },
+      template: { id: templateId, parameters: { routeURL: routeUrl } },
       // The dispatcher picked a channel in the dialog — an explicit
       // single-channel array, not "auto", so the send goes exactly where they
       // chose rather than wherever Sent's fallback would have picked.
@@ -107,7 +124,7 @@ export async function sendDriverRouteMessage(
       driver_id: input.driverId,
       channel: sentChannel,
       to_phone: input.toPhone,
-      body: input.previewBody,
+      body: storedBody,
       kind: "route_link",
       sent_by: user.id,
       provider_sid: result.recipients[0]?.messageId ?? null,

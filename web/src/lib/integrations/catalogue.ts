@@ -220,6 +220,19 @@ export const CONNECTORS: Connector[] = [
     ],
   },
   {
+    id: "shortio",
+    name: "Short.io link shortener",
+    purpose:
+      "Shortens the navigation URL in a driver route SMS. A multi-stop Google Maps link is ~500 characters and fragments the message — a dropped fragment leaves the driver with a dead link. Optional: without it the full URL is sent.",
+    icon: "link",
+    status: "not_configured",
+    envVars: ["SHORTIO_API_KEY", "SHORTIO_DOMAIN"],
+    secrets: ["SHORTIO_API_KEY"],
+    endpoint: "POST https://api.short.io/links",
+    note: "Auth is the raw API key in the `Authorization` header (not Bearer). `SHORTIO_DOMAIN` is the short domain links are created under — a custom domain or the plan's `*.short.gy` subdomain — and must already exist in the account. Re-shortening a URL that is already in the account returns the existing link without spending quota, so resends are free; only links over 100 characters are shortened.",
+    fields: [],
+  },
+  {
     id: "crm",
     name: "CRM ingestion",
     purpose:
@@ -355,6 +368,7 @@ export const DEFAULT_CONFIG: Record<string, Record<string, string | number | boo
     template_delivery_complete: "8c42ada4-eceb-45bb-8a80-0d2672aaa2e1",
   },
   crm: { enabled: false },
+  shortio: {},
   geocoding: { provider: "none" },
   routing: { provider: "none" },
   tachograph: { provider: "" },

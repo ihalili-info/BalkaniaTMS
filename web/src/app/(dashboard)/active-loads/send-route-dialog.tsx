@@ -303,7 +303,9 @@ export function SendRouteDialog({
               Sent template, with{" "}
               <span className="font-mono text-data-sm">{routeUrl ?? "—"}</span>{" "}
               as its link. The template&rsquo;s own wording may not match this
-              exactly.
+              exactly. When the short.io shortener is configured (Integrations),
+              this link is shortened before it&rsquo;s sent — the fix for an SMS
+              that arrives with the URL cut off.
             </p>
 
             {meta.unicode && channel === "sms" ? (

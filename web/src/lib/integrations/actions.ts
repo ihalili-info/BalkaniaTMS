@@ -10,6 +10,10 @@ import {
   verifyConnection as verifySentConnection,
 } from "@/lib/messaging/sent";
 import {
+  readShortioConfig,
+  verifyShortioConnection,
+} from "@/lib/messaging/shortio";
+import {
   ROUTING_MESSAGE,
   routingConfigured,
   verifyRoutingConnection,
@@ -127,6 +131,21 @@ export async function testConnections(): Promise<ConnectionTestResult[]> {
       ok: check.ok,
       message: check.ok
         ? "Key is valid."
+        : (check.error ?? `Request failed (${check.status}).`),
+    });
+  }
+
+  // Short.io is optional — only report it when it has been wired up, the same
+  // way Reveal / Geotab / geocoding are left out rather than shown as failing.
+  const shortioConfig = readShortioConfig();
+  if (shortioConfig) {
+    const check = await verifyShortioConnection(shortioConfig);
+    results.push({
+      id: "shortio",
+      name: "Short.io link shortener",
+      ok: check.ok,
+      message: check.ok
+        ? "Key is valid and the domain matches."
         : (check.error ?? `Request failed (${check.status}).`),
     });
   }
