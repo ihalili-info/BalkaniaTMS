@@ -1166,6 +1166,14 @@ export interface GeocodeLine {
   reference: string;
   outcome: "located" | "failed";
   detail: string;
+  /**
+   * The address string and postcode the lookup actually used — shown back so a
+   * failure is diagnosable. "Google found no match" against a blank or junk
+   * address is a CRM/CSV mapping problem, not a geocoder problem, and the two
+   * are indistinguishable without seeing what was searched.
+   */
+  queried: string;
+  postcode: string | null;
 }
 
 export interface GeocodeBatchResult extends WriteResult {
@@ -1215,6 +1223,27 @@ export async function geocodeOrders(ids: string[]): Promise<GeocodeBatchResult> 
     let located = 0;
 
     for (const order of orders ?? []) {
+      const base = {
+        orderId: order.id as string,
+        reference: order.crm_order_id as string,
+        queried: (order.delivery_address as string) ?? "",
+        postcode: (order.delivery_postcode as string | null) ?? null,
+      };
+
+      // A blank address with no postcode is not something Google can be asked
+      // about — it means the order arrived without a delivery location, which
+      // is a field-mapping problem upstream (CRM connector or CSV import), not
+      // a geocoding one. Say that plainly rather than "no match".
+      if (base.queried.trim() === "" && (base.postcode ?? "").trim() === "") {
+        lines.push({
+          ...base,
+          outcome: "failed",
+          detail:
+            "No address or postcode stored on this order — check the CRM/CSV field mapping.",
+        });
+        continue;
+      }
+
       const cached = await lookupGeocodeCache(
         supabase,
         order.delivery_country,
@@ -1261,8 +1290,7 @@ export async function geocodeOrders(ids: string[]): Promise<GeocodeBatchResult> 
           detail = `${cached.formatted ?? "matched"} · from a saved approximate location — check it`;
         } else {
           lines.push({
-            orderId: order.id,
-            reference: order.crm_order_id,
+            ...base,
             outcome: "failed",
             detail: GEOCODE_MESSAGE[result.failure ?? "no_result"],
           });
@@ -1278,19 +1306,13 @@ export async function geocodeOrders(ids: string[]): Promise<GeocodeBatchResult> 
       });
 
       if (writeError) {
-        lines.push({
-          orderId: order.id,
-          reference: order.crm_order_id,
-          outcome: "failed",
-          detail: writeError.message,
-        });
+        lines.push({ ...base, outcome: "failed", detail: writeError.message });
         continue;
       }
 
       located += 1;
       lines.push({
-        orderId: order.id,
-        reference: order.crm_order_id,
+        ...base,
         outcome: "located",
         // The normalised address is shown back deliberately: a match that
         // silently landed on the wrong Station Road is only catchable by

@@ -213,6 +213,14 @@ function normaliseEircode(postcode: string | null): string | null {
  * The postcode is passed the same way when present — for Ireland an Eircode
  * pins a single building, which turns an otherwise hopeless rural townland
  * address into a rooftop match.
+ *
+ * Three passes: (1) the Eircode alone, Ireland only; (2) the address string
+ * with `country` + `postal_code` component filters; (3) — only if pass 2 finds
+ * nothing — the address string with the postcode folded in as free text and
+ * just the `country` filter, because Google's `postal_code` component is a hard
+ * AND and returns ZERO_RESULTS on a slightly-off postcode where the same
+ * postcode as text would have matched. The in-country bounding-box check still
+ * applies to pass 3's result.
  */
 export async function geocodeAddress(
   address: string,
@@ -272,18 +280,33 @@ export async function geocodeAddress(
     return { ...empty, failure: "no_result" };
   }
 
-  const components = [`country:${countryCode}`];
-  if (postcode && postcode.trim() !== "") {
-    components.push(`postal_code:${postcode.trim()}`);
-  }
+  const trimmedPostcode = postcode?.trim() ?? "";
 
   const params = new URLSearchParams({
     address: trimmedAddress,
-    components: components.join("|"),
+    components: trimmedPostcode
+      ? `country:${countryCode}|postal_code:${trimmedPostcode}`
+      : `country:${countryCode}`,
     key,
   });
 
-  const hit = await runGeocode(params, countryCode);
+  let hit = await runGeocode(params, countryCode);
+
+  // --- pass 3: postcode folded into the string, not a component ----------
+  // Google's `postal_code` component filter is a hard AND and is unreliable
+  // outside the US — a slightly-off or unusual postcode makes it return
+  // ZERO_RESULTS when the address plus postcode as free text would have
+  // matched. Only retried when pass 2 found *nothing* and a postcode was in
+  // play, so it can never downgrade a result pass 2 already had.
+  if (hit.failure === "no_result" && trimmedPostcode) {
+    const looser = new URLSearchParams({
+      address: `${trimmedAddress}, ${trimmedPostcode}`,
+      components: `country:${countryCode}`,
+      key,
+    });
+    const retry = await runGeocode(looser, countryCode);
+    if (retry.point || retry.failure === null) hit = retry;
+  }
 
   if (hit.failure) {
     return { ...empty, failure: hit.failure };

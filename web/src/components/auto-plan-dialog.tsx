@@ -316,6 +316,11 @@ export function AutoPlanDialog({
                       <span className="block font-mono text-data-sm text-ink">
                         {line.reference}
                       </span>
+                      <span className="block truncate text-caption text-ink-muted">
+                        Searched:{" "}
+                        {line.queried || <em className="text-warn">no address</em>}
+                        {line.postcode ? ` · ${line.postcode}` : ""}
+                      </span>
                       <span className="block text-caption text-ink-subtle">
                         {line.detail}
                       </span>
