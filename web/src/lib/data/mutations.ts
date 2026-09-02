@@ -194,6 +194,7 @@ export async function importOrders(orders: Order[]): Promise<ImportOrdersResult>
       notifications_opt_out: o.notifications_opt_out,
       opted_out_at: o.opted_out_at,
       crm_vehicle: o.crm_vehicle,
+      delivery_city: o.delivery_city,
     }));
 
     const { data, error } = await supabase

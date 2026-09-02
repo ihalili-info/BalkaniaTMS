@@ -68,6 +68,8 @@ export default async function AnalyticsPage() {
   }));
 
   const maxDeliveries = Math.max(1, ...a.destinations.map((d) => d.deliveries));
+  const maxCityDeliveries = Math.max(1, ...a.cities.map((c) => c.deliveries));
+  const cityUnknown = a.cities.find((c) => c.city === "Unknown")?.deliveries ?? 0;
 
   return (
     <Page>
@@ -266,6 +268,104 @@ export default async function AnalyticsPage() {
               )}
             </Card>
           </div>
+
+          <Card className="mt-4">
+            <CardHeader
+              title="Destinations by city"
+              hint="Where the fleet delivered, by town / city"
+              actions={
+                a.cities.length > 0 ? (
+                  <Badge tone="neutral">
+                    {a.cities.length} cit{a.cities.length === 1 ? "y" : "ies"}
+                  </Badge>
+                ) : undefined
+              }
+            />
+            {a.cities.length > 0 ? (
+              <>
+                <div className="max-h-96 overflow-y-auto">
+                  <Table>
+                    <thead>
+                      <tr>
+                        <Th>City</Th>
+                        <Th className="w-56">Deliveries</Th>
+                        <Th className="text-right">On time</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {a.cities.map((c) => {
+                        const pct =
+                          c.measurable === 0
+                            ? null
+                            : Math.round((c.onTime / c.measurable) * 1000) / 10;
+                        return (
+                          <Tr key={`${c.city}|${c.country}`}>
+                            <Td className="font-medium text-ink">
+                              {c.city === "Unknown" ? (
+                                <span className="text-ink-subtle">
+                                  No city recorded
+                                </span>
+                              ) : (
+                                <>
+                                  {c.city}
+                                  <span className="ml-1.5 font-mono text-data-sm text-ink-subtle">
+                                    {c.country}
+                                  </span>
+                                </>
+                              )}
+                            </Td>
+                            <Td>
+                              <div className="flex items-center gap-3">
+                                <Progress
+                                  value={c.deliveries}
+                                  max={maxCityDeliveries}
+                                  className="flex-1"
+                                />
+                                <span className="w-8 shrink-0 text-right font-mono text-data-sm tabular text-ink-muted">
+                                  {c.deliveries}
+                                </span>
+                              </div>
+                            </Td>
+                            <Td className="text-right font-mono text-data-sm tabular">
+                              {pct === null ? (
+                                <span
+                                  className="text-ink-subtle"
+                                  title="No promised times for this city"
+                                >
+                                  —
+                                </span>
+                              ) : (
+                                <span
+                                  className={pct < 90 ? "text-warn" : "text-ink"}
+                                >
+                                  {pct.toFixed(1)}%
+                                </span>
+                              )}
+                            </Td>
+                          </Tr>
+                        );
+                      })}
+                    </tbody>
+                  </Table>
+                </div>
+                {cityUnknown > 0 ? (
+                  <p className="flex items-start gap-2 border-t border-hairline px-5 py-3 text-caption text-ink-subtle">
+                    <Icon name="info" className="mt-px text-[15px]" />
+                    {cityUnknown} deliver{cityUnknown === 1 ? "y" : "ies"} had no{" "}
+                    <code className="font-mono">delivery_city</code> — the CRM
+                    bridge or CSV import populates it; nothing is inferred from
+                    the address.
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <EmptyState
+                icon="location_city"
+                title="No completed deliveries yet"
+                description="City figures appear as loads finish. delivery_city comes from the CRM."
+              />
+            )}
+          </Card>
         </>
       )}
     </Page>

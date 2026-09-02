@@ -71,6 +71,11 @@ keep it and `supabase/migrations/` in sync.
     `current_role_name` stay granted to `authenticated` — the RLS policies
     call them). The `rls_policy_always_true` and PostGIS-in-`public` findings
     are assessed-and-left; see the file's footer and "Security Advisor" below.
+  - `0018_order_city.sql` — `orders.delivery_city`: delivery town/city, free
+    text from the CRM (never inferred from the address). Surfaced through
+    `orders_geo`, and `analytics_by_city()` — the same shape as
+    `analytics_destinations` one level finer, case/whitespace-folded, NULL →
+    "Unknown". Drives the "Destinations by city" card on Analytics.
 - `web/` — Next.js 16 (App Router, TypeScript, Tailwind v4) admin panel. See
   [web/README.md](web/README.md) for its layout and conventions.
   - `src/app/globals.css` — the entire design system as Tailwind v4 `@theme` tokens
@@ -478,7 +483,11 @@ explanation rather than a fabricated percentage. `promised_at` arrived in 0008
 precisely because the metric had no basis before it.
 
 "Corridors" are gone. The schema records a destination country, not a named
-corridor, so the table shows countries — the honest unit.
+corridor, so the table shows countries — the honest unit. The
+"Destinations by city" table (0018) goes one level finer off
+`orders.delivery_city`, which the **CRM supplies** — it is never parsed out of
+the free-text address. Orders with no city are their own "Unknown" row with a
+count and a note, not folded into a neighbour or dropped.
 
 ## Regulatory model
 

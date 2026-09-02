@@ -37,6 +37,8 @@
  *     "notifications_opt_out": false,                    // optional, default false
  *     "vehicle":               "24-D-11234",             // optional, free text —
  *                                                        //   the CRM's own vehicle
+ *     "city":                  "Cork",                   // optional, free text —
+ *                                                        //   delivery town/city
  *     "cancelled":             false                     // optional; true removes
  *   }                                                    //   a still-pending order
  *
@@ -70,6 +72,7 @@ export interface CrmOrderInput {
   promised_window_end?: unknown;
   notifications_opt_out?: unknown;
   vehicle?: unknown;
+  city?: unknown;
   cancelled?: unknown;
 }
 
@@ -96,6 +99,8 @@ export interface NormalisedCrmOrder {
   notificationsOptOut: boolean;
   /** The CRM's own assigned vehicle, free text. Reference only. */
   vehicle: string | null;
+  /** Delivery town/city, free text. For the Analytics "by city" breakdown. */
+  city: string | null;
 }
 
 export interface ParsedCrmOrder {
@@ -205,6 +210,7 @@ export function parseCrmOrder(raw: CrmOrderInput): ParsedCrmOrder {
 
   const cancelled = asBool(raw.cancelled) === true;
   const vehicle = asString(raw.vehicle) || null;
+  const city = asString(raw.city) || null;
 
   // --- country (needed for postcode + phone checks below) ---
   let deliveryCountry: CountryCode = HOME_COUNTRY;
@@ -246,6 +252,7 @@ export function parseCrmOrder(raw: CrmOrderInput): ParsedCrmOrder {
             promisedWindowEnd: null,
             notificationsOptOut: false,
             vehicle,
+            city,
           },
     };
   }
@@ -341,6 +348,7 @@ export function parseCrmOrder(raw: CrmOrderInput): ParsedCrmOrder {
           promisedWindowEnd: promisedEnd.value,
           notificationsOptOut: optOut ?? false,
           vehicle,
+          city,
         },
   };
 }

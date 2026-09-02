@@ -100,6 +100,7 @@ interface OrderGeoRow extends GeoRow {
   notifications_opt_out: boolean;
   opted_out_at: string | null;
   crm_vehicle: string | null;
+  delivery_city: string | null;
 }
 
 function toOrder(row: OrderGeoRow): Order {
@@ -118,6 +119,7 @@ function toOrder(row: OrderGeoRow): Order {
     notifications_opt_out: row.notifications_opt_out,
     opted_out_at: row.opted_out_at,
     crm_vehicle: row.crm_vehicle,
+    delivery_city: row.delivery_city,
   };
 }
 

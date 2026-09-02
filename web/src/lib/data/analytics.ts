@@ -25,10 +25,19 @@ export interface DestinationRow {
   measurable: number;
 }
 
+export interface CityRow {
+  city: string;
+  country: CountryCode;
+  deliveries: number;
+  onTime: number;
+  measurable: number;
+}
+
 export interface AnalyticsSummary {
   days: DayPoint[];
   alerts: { type: NotificationType; sent: number }[];
   destinations: DestinationRow[];
+  cities: CityRow[];
   totalDeliveries: number;
   /** null when nothing in the window carried a promised time. */
   onTimePct: number | null;
@@ -41,10 +50,11 @@ export interface AnalyticsSummary {
 export async function getAnalytics(days = 14): Promise<AnalyticsSummary> {
   const supabase = await createClient();
 
-  const [daily, alerts, destinations, lead] = await Promise.all([
+  const [daily, alerts, destinations, cities, lead] = await Promise.all([
     supabase.rpc("analytics_daily", { p_days: days }),
     supabase.rpc("analytics_alerts", { p_days: days }),
     supabase.rpc("analytics_destinations", { p_days: days }),
+    supabase.rpc("analytics_by_city", { p_days: days }),
     supabase.rpc("analytics_alert_lead_minutes", { p_days: days }),
   ]);
 
@@ -79,6 +89,14 @@ export async function getAnalytics(days = 14): Promise<AnalyticsSummary> {
     measurable: number;
   }[];
 
+  const cityRows = (cities.data ?? []) as {
+    city: string;
+    country: string;
+    deliveries: number;
+    on_time: number;
+    measurable: number;
+  }[];
+
   const leadValue = typeof lead.data === "number" ? lead.data : null;
 
   return {
@@ -89,6 +107,13 @@ export async function getAnalytics(days = 14): Promise<AnalyticsSummary> {
       deliveries: Number(d.deliveries ?? 0),
       onTime: Number(d.on_time ?? 0),
       measurable: Number(d.measurable ?? 0),
+    })),
+    cities: cityRows.map((c) => ({
+      city: c.city,
+      country: c.country,
+      deliveries: Number(c.deliveries ?? 0),
+      onTime: Number(c.on_time ?? 0),
+      measurable: Number(c.measurable ?? 0),
     })),
     totalDeliveries,
     measurable,

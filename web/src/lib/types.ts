@@ -144,6 +144,10 @@ export interface Order {
    * text. Reference only — `loads.truck_id` is the TMS's own dispatch plan.
    */
   crm_vehicle: string | null;
+
+  /** Delivery town/city (migration 0018), free text from the CRM. Drives the
+   *  Analytics "by city" breakdown; never inferred from the address. */
+  delivery_city: string | null;
 }
 
 export interface Load {

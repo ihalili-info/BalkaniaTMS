@@ -115,6 +115,9 @@ CREATE TABLE orders (
   -- migration 0016: the vehicle the source CRM assigned to this order, free
   -- text, reference only. Distinct from loads.truck_id (the TMS's own plan).
   crm_vehicle TEXT,
+  -- migration 0018: delivery town/city, free text from the CRM (never parsed
+  -- from the address). Feeds analytics_by_city().
+  delivery_city TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
