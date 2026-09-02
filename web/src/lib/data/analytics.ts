@@ -33,11 +33,24 @@ export interface CityRow {
   measurable: number;
 }
 
+export interface DriverRow {
+  driverId: string | null;
+  name: string;
+  /** Loads the driver completed at least one drop on. */
+  runs: number;
+  /** Stops delivered. */
+  drops: number;
+  onTime: number;
+  measurable: number;
+  lastDeliveryAt: string | null;
+}
+
 export interface AnalyticsSummary {
   days: DayPoint[];
   alerts: { type: NotificationType; sent: number }[];
   destinations: DestinationRow[];
   cities: CityRow[];
+  drivers: DriverRow[];
   totalDeliveries: number;
   /** null when nothing in the window carried a promised time. */
   onTimePct: number | null;
@@ -50,11 +63,12 @@ export interface AnalyticsSummary {
 export async function getAnalytics(days = 14): Promise<AnalyticsSummary> {
   const supabase = await createClient();
 
-  const [daily, alerts, destinations, cities, lead] = await Promise.all([
+  const [daily, alerts, destinations, cities, drivers, lead] = await Promise.all([
     supabase.rpc("analytics_daily", { p_days: days }),
     supabase.rpc("analytics_alerts", { p_days: days }),
     supabase.rpc("analytics_destinations", { p_days: days }),
     supabase.rpc("analytics_by_city", { p_days: days }),
+    supabase.rpc("analytics_by_driver", { p_days: days }),
     supabase.rpc("analytics_alert_lead_minutes", { p_days: days }),
   ]);
 
@@ -97,6 +111,16 @@ export async function getAnalytics(days = 14): Promise<AnalyticsSummary> {
     measurable: number;
   }[];
 
+  const driverRows = (drivers.data ?? []) as {
+    driver_id: string | null;
+    full_name: string | null;
+    runs: number;
+    drops: number;
+    on_time: number;
+    measurable: number;
+    last_delivery_at: string | null;
+  }[];
+
   const leadValue = typeof lead.data === "number" ? lead.data : null;
 
   return {
@@ -114,6 +138,15 @@ export async function getAnalytics(days = 14): Promise<AnalyticsSummary> {
       deliveries: Number(c.deliveries ?? 0),
       onTime: Number(c.on_time ?? 0),
       measurable: Number(c.measurable ?? 0),
+    })),
+    drivers: driverRows.map((d) => ({
+      driverId: d.driver_id,
+      name: d.full_name ?? "Unassigned",
+      runs: Number(d.runs ?? 0),
+      drops: Number(d.drops ?? 0),
+      onTime: Number(d.on_time ?? 0),
+      measurable: Number(d.measurable ?? 0),
+      lastDeliveryAt: d.last_delivery_at,
     })),
     totalDeliveries,
     measurable,

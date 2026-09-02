@@ -76,6 +76,11 @@ keep it and `supabase/migrations/` in sync.
     `orders_geo`, and `analytics_by_city()` — the same shape as
     `analytics_destinations` one level finer, case/whitespace-folded, NULL →
     "Unknown". Drives the "Destinations by city" card on Analytics.
+  - `0019_analytics_by_driver.sql` — `analytics_by_driver()` RPC only (no
+    schema change): per-driver runs (distinct completed loads), drops
+    (delivered stops), on-time and last-active over the window, from
+    `loads.driver_id`. Loads with no driver collapse to one "Unassigned" row.
+    Drives the "Drivers" card on Analytics.
 - `web/` — Next.js 16 (App Router, TypeScript, Tailwind v4) admin panel. See
   [web/README.md](web/README.md) for its layout and conventions.
   - `src/app/globals.css` — the entire design system as Tailwind v4 `@theme` tokens
@@ -488,6 +493,14 @@ corridor, so the table shows countries — the honest unit. The
 `orders.delivery_city`, which the **CRM supplies** — it is never parsed out of
 the free-text address. Orders with no city are their own "Unknown" row with a
 count and a note, not folded into a neighbour or dropped.
+
+The "Drivers" table (0019, `analytics_by_driver()`) counts **runs** (distinct
+loads with a completed drop) and **drops** (delivered stops) per
+`loads.driver_id`, plus that driver's on-time rate and last active. A load
+with no driver is one "Unassigned" row — the work happened and hiding it would
+undercount the fleet. These are throughput figures, **not** a driving-time or
+duty record; the tachograph (Reg. 165/2014) remains the only evidence of that,
+and nothing here should be presented as compliance.
 
 ## Regulatory model
 

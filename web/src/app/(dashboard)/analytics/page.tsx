@@ -21,6 +21,7 @@ import {
 } from "@/components/ui";
 import { getAnalytics } from "@/lib/data/analytics";
 import { country } from "@/lib/regions";
+import { relativeTime } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Analytics" };
 
@@ -70,6 +71,8 @@ export default async function AnalyticsPage() {
   const maxDeliveries = Math.max(1, ...a.destinations.map((d) => d.deliveries));
   const maxCityDeliveries = Math.max(1, ...a.cities.map((c) => c.deliveries));
   const cityUnknown = a.cities.find((c) => c.city === "Unknown")?.deliveries ?? 0;
+  const maxDriverDrops = Math.max(1, ...a.drivers.map((d) => d.drops));
+  const now = new Date();
 
   return (
     <Page>
@@ -363,6 +366,99 @@ export default async function AnalyticsPage() {
                 icon="location_city"
                 title="No completed deliveries yet"
                 description="City figures appear as loads finish. delivery_city comes from the CRM."
+              />
+            )}
+          </Card>
+
+          <Card className="mt-4">
+            <CardHeader
+              title="Drivers"
+              hint="Runs and drops completed in the window"
+              actions={
+                a.drivers.length > 0 ? (
+                  <Badge tone="neutral">
+                    {a.drivers.filter((d) => d.driverId !== null).length} driver
+                    {a.drivers.filter((d) => d.driverId !== null).length === 1
+                      ? ""
+                      : "s"}
+                  </Badge>
+                ) : undefined
+              }
+            />
+            {a.drivers.length > 0 ? (
+              <div className="max-h-96 overflow-y-auto">
+                <Table>
+                  <thead>
+                    <tr>
+                      <Th>Driver</Th>
+                      <Th className="text-right">Runs</Th>
+                      <Th className="w-56">Drops</Th>
+                      <Th className="text-right">On time</Th>
+                      <Th className="text-right">Last active</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {a.drivers.map((d) => {
+                      const pct =
+                        d.measurable === 0
+                          ? null
+                          : Math.round((d.onTime / d.measurable) * 1000) / 10;
+                      return (
+                        <Tr key={d.driverId ?? "unassigned"}>
+                          <Td className="font-medium text-ink">
+                            {d.driverId === null ? (
+                              <span className="text-ink-subtle">Unassigned</span>
+                            ) : (
+                              d.name
+                            )}
+                          </Td>
+                          <Td className="text-right font-mono text-data-sm tabular text-ink-muted">
+                            {d.runs}
+                          </Td>
+                          <Td>
+                            <div className="flex items-center gap-3">
+                              <Progress
+                                value={d.drops}
+                                max={maxDriverDrops}
+                                className="flex-1"
+                              />
+                              <span className="w-8 shrink-0 text-right font-mono text-data-sm tabular text-ink-muted">
+                                {d.drops}
+                              </span>
+                            </div>
+                          </Td>
+                          <Td className="text-right font-mono text-data-sm tabular">
+                            {pct === null ? (
+                              <span
+                                className="text-ink-subtle"
+                                title="No promised times for this driver's stops"
+                              >
+                                —
+                              </span>
+                            ) : (
+                              <span
+                                className={pct < 90 ? "text-warn" : "text-ink"}
+                              >
+                                {pct.toFixed(1)}%
+                              </span>
+                            )}
+                          </Td>
+                          <Td className="whitespace-nowrap text-right text-caption text-ink-subtle">
+                            {d.lastDeliveryAt
+                              ? relativeTime(d.lastDeliveryAt, now)
+                              : "—"}
+                          </Td>
+                        </Tr>
+                      );
+                    })}
+                  </tbody>
+                </Table>
+              </div>
+            ) : (
+              <EmptyState
+                icon="badge"
+                title="No completed deliveries yet"
+                description="Driver figures appear as loads finish. A load with no driver assigned shows as Unassigned."
               />
             )}
           </Card>
