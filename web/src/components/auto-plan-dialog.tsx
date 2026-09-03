@@ -229,7 +229,7 @@ export function AutoPlanDialog({
         role="dialog"
         aria-modal="true"
         aria-label="Auto-plan loads"
-        className="fixed inset-x-4 top-[4vh] z-50 mx-auto flex max-h-[92vh] max-w-4xl flex-col overflow-hidden rounded-lg border border-hairline bg-surface shadow-pop"
+        className="fixed inset-x-3 top-[3vh] z-50 mx-auto flex max-h-[94vh] max-w-6xl flex-col overflow-hidden rounded-lg border border-hairline bg-surface shadow-pop"
       >
         <header className="flex items-start justify-between gap-3 border-b border-hairline px-6 py-4">
           <div>
@@ -428,11 +428,13 @@ export function AutoPlanDialog({
           </p>
 
           {/* --- step 3: the proposal ------------------------------------- */}
+          {/* Below lg the map and the group list share the space and toggle;
+              from lg up they sit side by side and this switcher is hidden. */}
           {plan.loads.length > 0 ? (
             <div
               role="tablist"
               aria-label="Proposal view"
-              className="mb-3 flex gap-1 border-b border-hairline"
+              className="mb-3 flex gap-1 border-b border-hairline lg:hidden"
             >
               {(["list", "map"] as const).map((v) => (
                 <button
@@ -462,28 +464,17 @@ export function AutoPlanDialog({
             <p className="rounded-sm border border-dashed border-hairline-strong px-3 py-8 text-center text-caption text-ink-subtle">
               Nothing to group yet. Orders need coordinates first.
             </p>
-          ) : view === "map" ? (
-            <>
-              {mapsKey ? (
-                <PlanGoogleMap
-                  apiKey={mapsKey}
-                  depot={DEPOT_LATLNG}
-                  groups={mapGroups}
-                />
-              ) : (
-                <PlanMap
-                  depot={DEPOT_LATLNG}
-                  groups={mapGroups}
-                />
-              )}
-              <p className="mt-2 text-caption text-ink-subtle">
-                Straight lines from the depot through each group&rsquo;s stops
-                and back — the geometry the planner sequenced on, not a road
-                route. Uncheck a group in the list to drop it; it dims here.
-              </p>
-            </>
           ) : (
-            <ul className="space-y-3">
+            <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start lg:gap-6">
+              {/* Group + order adjustments — the left pane from lg up, a
+                  toggled full-width view below it. */}
+              <div
+                className={cx(
+                  "min-w-0",
+                  view === "map" && "hidden lg:block",
+                )}
+              >
+                <ul className="space-y-3">
               {plan.loads.map((load, index) => {
                 const off = dropped.has(index);
                 const chosen = truckFor(load, index);
@@ -596,7 +587,38 @@ export function AutoPlanDialog({
                   </li>
                 );
               })}
-            </ul>
+                </ul>
+              </div>
+
+              {/* The map — the right pane from lg up, kept in view while the
+                  group list scrolls; a toggled full-width view below lg. */}
+              <div
+                className={cx(
+                  "mt-4 lg:mt-0 lg:sticky lg:top-0",
+                  view === "list" && "hidden lg:block",
+                )}
+              >
+                {mapsKey ? (
+                  <PlanGoogleMap
+                    apiKey={mapsKey}
+                    depot={DEPOT_LATLNG}
+                    groups={mapGroups}
+                    heightClass="h-[24rem] lg:h-[34rem]"
+                  />
+                ) : (
+                  <PlanMap
+                    depot={DEPOT_LATLNG}
+                    groups={mapGroups}
+                    heightClass="h-[24rem] lg:h-[34rem]"
+                  />
+                )}
+                <p className="mt-2 text-caption text-ink-subtle">
+                  Straight lines from the depot through each group&rsquo;s stops
+                  and back — the geometry the planner sequenced on, not a road
+                  route. Uncheck a group to drop it; it dims here.
+                </p>
+              </div>
+            </div>
           )}
 
           {plan.unTrucked > 0 ? (

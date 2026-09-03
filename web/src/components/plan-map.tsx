@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 
+import { cx } from "@/components/ui";
 import { REFERENCE_PLACES } from "@/lib/geo/reference";
 import type { LatLng } from "@/lib/types";
 
@@ -54,9 +55,13 @@ type XY = { x: number; y: number };
 export function PlanMap({
   depot,
   groups,
+  heightClass,
 }: {
   depot: LatLng;
   groups: PlanMapGroup[];
+  /** Tailwind height for the drawing. Given a fixed height in the side-by-side
+   *  layout; otherwise the schematic keeps its 1.7:1 letterbox. */
+  heightClass?: string;
 }) {
   const view = useMemo(() => {
     const points: LatLng[] = [
@@ -150,8 +155,9 @@ export function PlanMap({
     <div className="overflow-hidden rounded-lg border border-hairline bg-surface-muted">
       <svg
         viewBox={view.viewBox}
-        className="block w-full"
-        style={{ aspectRatio: "1.7 / 1" }}
+        preserveAspectRatio="xMidYMid meet"
+        className={cx("block w-full", heightClass)}
+        style={heightClass ? undefined : { aspectRatio: "1.7 / 1" }}
         role="img"
         aria-label="Schematic of the proposed load routes from the depot"
       >

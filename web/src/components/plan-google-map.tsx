@@ -13,7 +13,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { Icon } from "@/components/ui";
+import { Icon, cx } from "@/components/ui";
 import { loadGoogleMaps, token } from "@/lib/maps";
 import type { LatLng } from "@/lib/types";
 
@@ -23,10 +23,13 @@ export function PlanGoogleMap({
   apiKey,
   depot,
   groups,
+  heightClass = "h-[24rem]",
 }: {
   apiKey: string;
   depot: LatLng;
   groups: PlanMapGroup[];
+  /** Tailwind height for the map canvas. Taller in the side-by-side layout. */
+  heightClass?: string;
 }) {
   const holder = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -182,7 +185,7 @@ export function PlanGoogleMap({
 
   if (status === "error") {
     return (
-      <div className="flex h-[24rem] flex-col items-center justify-center gap-2 rounded-lg border border-hairline bg-surface-muted px-6 text-center">
+      <div className={cx("flex flex-col items-center justify-center gap-2 rounded-lg border border-hairline bg-surface-muted px-6 text-center", heightClass)}>
         <Icon name="map" className="text-[26px] text-ink-subtle" />
         <p className="text-body-sm font-medium text-ink">Google Maps did not load</p>
         <p className="max-w-md text-caption text-ink-subtle">
@@ -196,7 +199,7 @@ export function PlanGoogleMap({
 
   return (
     <div className="relative overflow-hidden rounded-lg border border-hairline">
-      <div ref={holder} className="h-[24rem] w-full" />
+      <div ref={holder} className={cx("w-full", heightClass)} />
       {status === "loading" ? (
         <div className="absolute inset-0 flex items-center justify-center bg-surface-muted">
           <span className="flex items-center gap-2 text-body-sm text-ink-subtle">
