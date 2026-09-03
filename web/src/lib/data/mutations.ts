@@ -24,7 +24,7 @@ import {
 } from "@/lib/routing/google";
 import { coordKey } from "@/lib/format";
 import { DEPOT } from "@/lib/geo/reference";
-import { settleStopDelivered } from "@/lib/data/stop-delivery";
+import { settleStopDelivered, syncLoadCompletion } from "@/lib/data/stop-delivery";
 
 /**
  * Writes.
@@ -815,34 +815,6 @@ export async function undeliverStop(loadItemId: string): Promise<WriteResult> {
       };
     }
 
-    const { data: load, error: loadError } = await supabase
-      .from("loads")
-      .select("id, status, truck_id, driver_id")
-      .eq("id", item.load_id)
-      .maybeSingle();
-    if (loadError) return { ok: false, message: loadError.message };
-
-    // Decide whether the load can reopen *before* touching anything, so a
-    // blocked reopen still leaves a consistent state rather than a half-write.
-    let reopenBlocked = false;
-    if (load?.status === "completed") {
-      for (const [col, value] of [
-        ["truck_id", load.truck_id],
-        ["driver_id", load.driver_id],
-      ] as const) {
-        if (!value) continue;
-        const { data: clash, error: clashError } = await supabase
-          .from("loads")
-          .select("id")
-          .eq(col, value)
-          .eq("status", "active")
-          .neq("id", load.id)
-          .limit(1);
-        if (clashError) return { ok: false, message: clashError.message };
-        if (clash && clash.length > 0) reopenBlocked = true;
-      }
-    }
-
     const now = new Date().toISOString();
     const { error: stopError } = await supabase
       .from("load_items")
@@ -856,13 +828,12 @@ export async function undeliverStop(loadItemId: string): Promise<WriteResult> {
       .update({ status: "en_route", updated_at: now })
       .eq("id", item.order_id);
 
-    if (load?.status === "completed" && !reopenBlocked) {
-      await supabase
-        .from("loads")
-        .update({ status: "active" })
-        .eq("id", load.id)
-        .eq("status", "completed");
-    }
+    // Reopen the load if this stop is what completed it — unless its truck or
+    // driver has since been given another active load, the clash `startLoad`
+    // exists to prevent. `syncLoadCompletion` owns that decision.
+    const sync = await syncLoadCompletion(supabase, item.load_id);
+    if (!sync.ok) return { ok: false, message: sync.message };
+    const reopenBlocked = sync.reopenBlocked;
 
     revalidatePath("/active-loads");
     revalidatePath("/orders-queue");
@@ -981,10 +952,22 @@ export async function updateLoad(
       }
     }
 
+    // Editing the stop set can finish a load (the last outstanding stop was
+    // removed) or reopen a completed one (a fresh stop was added). Nothing
+    // above touches `loads.status`, so reconcile it now.
+    const sync = await syncLoadCompletion(supabase, loadId);
+    if (!sync.ok) return { ok: false, message: sync.message };
+
     revalidatePath("/active-loads");
     revalidatePath("/orders-queue");
     revalidatePath("/live-fleet-map");
-    return { ok: true, message: null };
+    return {
+      ok: true,
+      message:
+        sync.changed && sync.status === "completed"
+          ? "Every remaining stop is already delivered — load marked complete."
+          : null,
+    };
   } catch (e) {
     return { ok: false, message: (e as Error).message };
   }
