@@ -181,7 +181,7 @@ export function FleetMap({
   }
 
   return (
-    <div className="grid items-start gap-4 xl:grid-cols-[1fr_20rem]">
+    <div className="space-y-4">
       <Card className="overflow-hidden">
         <CardHeader
           title="Fleet positions"
@@ -218,11 +218,12 @@ export function FleetMap({
               pendingOrders={pendingOrders}
               selectedId={selectedId}
               onSelect={setSelectedId}
+              heightClass="h-[26rem] sm:h-[34rem] xl:h-[42rem]"
             />
           ) : (
             <svg
               viewBox={`${view.minX} ${view.minY} ${view.w} ${view.h}`}
-              className="h-[30rem] w-full"
+              className="h-[26rem] w-full sm:h-[34rem] xl:h-[42rem]"
               role="img"
               aria-label="Schematic map of truck positions and delivery geofences"
             >
@@ -460,7 +461,9 @@ export function FleetMap({
         </div>
       </Card>
 
-      <div className="space-y-4">
+      {/* The fleet detail sits under the wide map — Active loads, Units and the
+          selected truck side by side from lg up, stacked below it. */}
+      <div className="grid items-start gap-4 lg:grid-cols-3">
         <Card>
           <CardHeader
             title="Active loads"
@@ -473,7 +476,7 @@ export function FleetMap({
               description="Loads appear here once a driver departs on one."
             />
           ) : (
-            <ul className="divide-y divide-hairline">
+            <ul className="max-h-[26rem] divide-y divide-hairline overflow-y-auto">
               {activeLoads.map((load) => {
                 const stop = nextStop(load);
                 const truckId = load.truck_id;
@@ -527,7 +530,7 @@ export function FleetMap({
             title="Units"
             hint={`${located.length} of ${trucks.length} reporting`}
           />
-          <ul className="divide-y divide-hairline">
+          <ul className="max-h-[26rem] divide-y divide-hairline overflow-y-auto">
             {trucks.map((truck) => {
               const load = loadForTruck(loads, truck.id);
               const stop = load ? nextStop(load) : undefined;

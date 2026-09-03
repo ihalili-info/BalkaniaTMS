@@ -15,7 +15,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { Icon } from "@/components/ui";
+import { Icon, cx } from "@/components/ui";
 import { GEOFENCE_RADIUS_M, loadForTruck, nextStop } from "@/lib/fleet-selectors";
 import { DEPOT } from "@/lib/geo/reference";
 import { MAP_DEFAULT_ZOOM, loadGoogleMaps, token } from "@/lib/maps";
@@ -34,6 +34,7 @@ export function GoogleCanvas({
   pendingOrders,
   selectedId,
   onSelect,
+  heightClass = "h-[30rem]",
 }: {
   apiKey: string;
   trucks: Truck[];
@@ -42,6 +43,8 @@ export function GoogleCanvas({
   pendingOrders: Order[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** Tailwind height for the map canvas. Taller now the map is full width. */
+  heightClass?: string;
 }) {
   const holder = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -327,7 +330,7 @@ export function GoogleCanvas({
 
   if (status === "error") {
     return (
-      <div className="flex h-[30rem] flex-col items-center justify-center gap-2 bg-surface-muted px-6 text-center">
+      <div className={cx("flex flex-col items-center justify-center gap-2 bg-surface-muted px-6 text-center", heightClass)}>
         <Icon name="map" className="text-[28px] text-ink-subtle" />
         <p className="text-body-sm font-medium text-ink">
           Google Maps did not load
@@ -343,7 +346,7 @@ export function GoogleCanvas({
 
   return (
     <div className="relative">
-      <div ref={holder} className="h-[30rem] w-full" />
+      <div ref={holder} className={cx("w-full", heightClass)} />
       {status === "loading" ? (
         <div className="absolute inset-0 flex items-center justify-center bg-surface-muted">
           <span className="flex items-center gap-2 text-body-sm text-ink-subtle">
