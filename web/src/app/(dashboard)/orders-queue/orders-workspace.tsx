@@ -41,10 +41,14 @@ export function OrdersWorkspace({
   const [importedIds, setImportedIds] = useState<Set<string>>(new Set());
   const [dialogOpen, setDialogOpen] = useState(false);
   const [lastImport, setLastImport] = useState<number | null>(null);
-  const [fixing, setFixing] = useState<{ startWith: string | null } | null>(
-    null,
-  );
-  const [lastFixed, setLastFixed] = useState<string | null>(null);
+  const [fixing, setFixing] = useState<{
+    orders: Order[];
+    startWith: string | null;
+  } | null>(null);
+  const [lastFixed, setLastFixed] = useState<{
+    ref: string | null;
+    wasLocated: boolean;
+  } | null>(null);
 
   const stats = useMemo(() => {
     const unassigned = orders.filter((o) => !loadRefByOrderId[o.id]);
@@ -68,7 +72,7 @@ export function OrdersWorkspace({
 
   const [writeError, setWriteError] = useState<string | null>(null);
 
-  /** Where a corrected address lands. */
+  /** Where a corrected or redirected address lands. */
   const handleFix = (
     orderId: string,
     patch: {
@@ -78,6 +82,9 @@ export function OrdersWorkspace({
       delivery_location: LatLng;
     },
   ) => {
+    const before = orders.find((o) => o.id === orderId);
+    const wasLocated = before?.delivery_location != null;
+
     setOrders((prev) =>
       prev.map((o) =>
         o.id === orderId
@@ -85,16 +92,26 @@ export function OrdersWorkspace({
           : o,
       ),
     );
-    const fixed = orders.find((o) => o.id === orderId);
-    setLastFixed(fixed?.crm_order_id ?? null);
+    setLastFixed({ ref: before?.crm_order_id ?? null, wasLocated });
     setWriteError(null);
     void fixOrderAddress(orderId, patch).then((r) => {
       if (!r.ok) setWriteError(r.message ?? "Could not save the address.");
     });
 
-    // Stay open while there is more to fix; the list shrinks under us.
-    const remaining = stats.ungeocoded.filter((o) => o.id !== orderId);
-    setFixing(remaining.length > 0 ? { startWith: remaining[0].id } : null);
+    // The ungeocoded batch flow steps through what is left; a single-row edit
+    // just closes.
+    const rest = (fixing?.orders ?? []).filter(
+      (o) => o.id !== orderId && o.delivery_location === null,
+    );
+    setFixing(
+      rest.length > 0 ? { orders: rest, startWith: rest[0].id } : null,
+    );
+  };
+
+  /** One row's "Change address" / "Fix address" — opens the dialog on it alone. */
+  const handleEditAddress = (orderId: string) => {
+    const target = orders.find((o) => o.id === orderId);
+    if (target) setFixing({ orders: [target], startWith: target.id });
   };
 
   /**
@@ -206,10 +223,16 @@ export function OrdersWorkspace({
         <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-ok-border bg-ok-soft px-4 py-3">
           <Icon name="edit_location_alt" className="text-[20px] text-ok" />
           <p className="min-w-0 flex-1 text-body-sm text-ink">
-            <span className="font-mono text-data-sm">{lastFixed}</span> now has
-            coordinates.{" "}
+            <span className="font-mono text-data-sm">
+              {lastFixed.ref ?? "The order"}
+            </span>{" "}
+            {lastFixed.wasLocated
+              ? "has a new delivery address."
+              : "now has coordinates."}{" "}
             <span className="text-ink-muted">
-              It will appear on the fleet map and can be routed to.
+              {lastFixed.wasLocated
+                ? "The stop moves to the new point on the fleet map."
+                : "It will appear on the fleet map and can be routed to."}
             </span>
           </p>
           <Button variant="ghost" onClick={() => setLastFixed(null)}>
@@ -251,7 +274,12 @@ export function OrdersWorkspace({
           <Button
             variant="danger"
             icon="edit_location_alt"
-            onClick={() => setFixing({ startWith: stats.ungeocoded[0].id })}
+            onClick={() =>
+              setFixing({
+                orders: stats.ungeocoded,
+                startWith: stats.ungeocoded[0].id,
+              })
+            }
           >
             Fix {stats.ungeocoded.length === 1 ? "address" : "addresses"}
           </Button>
@@ -285,14 +313,15 @@ export function OrdersWorkspace({
         importedIds={importedIds}
         geocodingReady={geocodingReady}
         mapsKey={mapsKey}
-        onFixAddress={(id) => setFixing({ startWith: id })}
+        onFixAddress={handleEditAddress}
         onOrdersDeleted={handleOrdersDeleted}
       />
 
       {fixing ? (
         <FixAddressesDialog
-          orders={stats.ungeocoded}
+          orders={fixing.orders}
           startWith={fixing.startWith}
+          geocodingReady={geocodingReady}
           onSave={handleFix}
           onClose={() => setFixing(null)}
         />

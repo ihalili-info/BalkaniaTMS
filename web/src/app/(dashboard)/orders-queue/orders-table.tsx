@@ -281,6 +281,16 @@ export function OrdersTable({
                         <Icon name="edit_location_alt" className="text-[12px]" />
                         Fix address
                       </button>
+                    ) : order.status !== "delivered" ? (
+                      <button
+                        type="button"
+                        onClick={() => onFixAddress?.(order.id)}
+                        title="Redirect this order to a different drop-off"
+                        className="mt-1 inline-flex items-center gap-1 text-caption font-medium text-ink-subtle transition-colors hover:text-brand"
+                      >
+                        <Icon name="edit_location_alt" className="text-[12px]" />
+                        Change address
+                      </button>
                     ) : null}
                   </Td>
                   <Td>

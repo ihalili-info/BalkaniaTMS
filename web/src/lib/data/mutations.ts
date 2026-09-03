@@ -266,6 +266,24 @@ export async function fixOrderAddress(
     const user = await requireSession();
     const supabase = await createClient();
 
+    // A delivered stop records where the goods actually went. Redirecting it
+    // afterwards would rewrite that; the queue lets you change the address only
+    // while the order is still in flight.
+    const { data: doneItems, error: doneError } = await supabase
+      .from("load_items")
+      .select("id")
+      .eq("order_id", orderId)
+      .not("delivered_at", "is", null)
+      .limit(1);
+    if (doneError) return { ok: false, message: doneError.message };
+    if (doneItems && doneItems.length > 0) {
+      return {
+        ok: false,
+        message:
+          "This order has already been delivered — its address is the record of where it went and can't be changed.",
+      };
+    }
+
     const postcode = normalisePostcode(
       patch.delivery_country,
       patch.delivery_postcode,
@@ -304,9 +322,78 @@ export async function fixOrderAddress(
 
     revalidatePath("/orders-queue");
     revalidatePath("/live-fleet-map");
+    // A redirected order may be a stop on an active load — the board shows the
+    // address and routes the next-stop ETA from it.
+    revalidatePath("/active-loads");
     return { ok: true, message: null };
   } catch (e) {
     return { ok: false, message: (e as Error).message };
+  }
+}
+
+export interface AddressGeocodePreview {
+  ok: boolean;
+  point: LatLng | null;
+  /** Google's normalised address, shown back so a wrong match is catchable. */
+  formatted: string | null;
+  matchedBy: "eircode" | "address" | null;
+  partial: boolean;
+  message: string | null;
+}
+
+/**
+ * Geocode a typed address **without writing anything** — for the "Change
+ * delivery address" dialog, where the dispatcher is still editing and just
+ * wants the pin filled in.
+ *
+ * Same precision bar as the import path: an `APPROXIMATE` match is refused
+ * (`too_coarse`), because a town-centre point sits inside the 5 km geofence and
+ * would fire the customer alert while the driver is streets away. When it comes
+ * back empty the dialog falls back to the manual paste field.
+ */
+export async function previewOrderGeocode(
+  address: string,
+  countryCode: CountryCode,
+  postcode: string | null,
+): Promise<AddressGeocodePreview> {
+  const empty: AddressGeocodePreview = {
+    ok: false,
+    point: null,
+    formatted: null,
+    matchedBy: null,
+    partial: false,
+    message: null,
+  };
+  try {
+    await requireSession();
+    if (!geocodingConfigured()) {
+      return { ...empty, message: GEOCODE_MESSAGE.not_configured };
+    }
+    if (address.trim() === "" && (postcode ?? "").trim() === "") {
+      return { ...empty, message: "Type an address or postcode to look up." };
+    }
+
+    const result = await geocodeAddress(address, countryCode, postcode);
+    if (!result.point) {
+      return {
+        ...empty,
+        formatted: result.formatted,
+        message: GEOCODE_MESSAGE[result.failure ?? "no_result"],
+      };
+    }
+
+    return {
+      ok: true,
+      point: result.point,
+      formatted: result.formatted,
+      matchedBy: result.matchedBy,
+      partial: result.partial,
+      message: result.partial
+        ? "Google flagged this as a partial match — check the address it returned."
+        : null,
+    };
+  } catch (e) {
+    return { ...empty, message: (e as Error).message };
   }
 }
 

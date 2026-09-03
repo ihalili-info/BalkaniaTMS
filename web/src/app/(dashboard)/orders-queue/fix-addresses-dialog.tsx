@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 
 import { Badge, Button, Field, Icon, controlClass, cx } from "@/components/ui";
 import {
@@ -8,6 +8,10 @@ import {
   checkCoordinates,
   parseCoordinates,
 } from "@/lib/geocoding";
+import {
+  previewOrderGeocode,
+  type AddressGeocodePreview,
+} from "@/lib/data/mutations";
 import { COUNTRIES, country } from "@/lib/regions";
 import type { CountryCode } from "@/lib/regions";
 import type { LatLng, Order } from "@/lib/types";
@@ -31,27 +35,43 @@ function searchUrl(address: string, postcode: string, code: CountryCode) {
  * Mounted with `key={order.id}` so stepping to the next order remounts it with
  * fresh state. Re-seeding six fields from an effect would be the same thing
  * done worse, and would fight whatever the dispatcher had already typed.
+ *
+ * Two ways in: an order that never geocoded (needs a first coordinate), and an
+ * order being **redirected** to a different drop-off because the customer
+ * asked. The second one arrives with an address and a pin already, so the
+ * fields are seeded from it and only what changes has to be retyped.
  */
 function AddressForm({
   order,
+  geocodingReady,
   onSave,
   onClose,
 }: {
   order: Order;
+  /** GEOCODING_API_KEY is set — offer a one-click lookup instead of a manual pin. */
+  geocodingReady: boolean;
   onSave: (orderId: string, patch: AddressPatch) => void;
   onClose: () => void;
 }) {
+  const redirecting = order.delivery_location !== null;
+
   const [address, setAddress] = useState(order.delivery_address);
   const [postcode, setPostcode] = useState(order.delivery_postcode ?? "");
   const [code, setCode] = useState<CountryCode>(order.delivery_country);
   const [paste, setPaste] = useState("");
-  const [lat, setLat] = useState("");
-  const [lng, setLng] = useState("");
+  const [lat, setLat] = useState(
+    order.delivery_location ? String(order.delivery_location.lat) : "",
+  );
+  const [lng, setLng] = useState(
+    order.delivery_location ? String(order.delivery_location.lng) : "",
+  );
   const [parsed, setParsed] = useState<ReturnType<typeof parseCoordinates>>({
     point: null,
     failure: null,
     source: null,
   });
+  const [lookup, setLookup] = useState<AddressGeocodePreview | null>(null);
+  const [looking, startLooking] = useTransition();
 
   /** Parsed on input rather than in an effect — the paste *is* the event. */
   const handlePaste = (value: string) => {
@@ -64,6 +84,20 @@ function AddressForm({
     }
   };
 
+  const runLookup = () =>
+    startLooking(async () => {
+      const result = await previewOrderGeocode(
+        address.trim(),
+        code,
+        postcode.trim() === "" ? null : postcode.trim(),
+      );
+      setLookup(result);
+      if (result.point) {
+        setLat(String(result.point.lat));
+        setLng(String(result.point.lng));
+      }
+    });
+
   const point: LatLng | null = useMemo(() => {
     const la = Number.parseFloat(lat.replace(",", "."));
     const ln = Number.parseFloat(lng.replace(",", "."));
@@ -71,6 +105,15 @@ function AddressForm({
     if (Math.abs(la) > 90 || Math.abs(ln) > 180) return null;
     return { lat: la, lng: ln };
   }, [lat, lng]);
+
+  // Coordinates that came in with the order and have not been touched — no need
+  // to make the dispatcher re-confirm a pin they are not changing.
+  const pointUnchanged =
+    redirecting &&
+    point !== null &&
+    order.delivery_location !== null &&
+    point.lat === order.delivery_location.lat &&
+    point.lng === order.delivery_location.lng;
 
   const check = point ? checkCoordinates(point, code) : null;
   const spec = country(code);
@@ -90,11 +133,21 @@ function AddressForm({
   return (
     <>
       <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+        {redirecting ? (
+          <p className="flex items-start gap-2 rounded-sm border border-hairline bg-surface-muted px-3 py-2.5 text-caption text-ink-muted">
+            <Icon name="alt_route" className="mt-px text-[16px] text-ink-subtle" />
+            This order already has a drop-off point. Change the address to send
+            the driver somewhere else — the stop moves on the fleet map and any
+            route is re-driven from the new point. Blocked once the stop has been
+            delivered.
+          </p>
+        ) : null}
+
         <section className="space-y-3">
           <Field
             label="Delivery address"
             htmlFor="fix-address"
-            hint="Correct it here if it is wrong — this is what the driver sees."
+            hint="This is what the driver sees and what the geofence is drawn around."
           >
             <textarea
               id="fix-address"
@@ -143,9 +196,20 @@ function AddressForm({
         <section>
           <div className="mb-1 flex flex-wrap items-center gap-2">
             <h3 className="text-heading text-ink">Coordinates</h3>
-            <Badge tone="warn" title="No geocoding provider is configured">
-              Manual
-            </Badge>
+            {!geocodingReady ? (
+              <Badge tone="warn" title="No geocoding provider is configured">
+                Manual
+              </Badge>
+            ) : null}
+            {geocodingReady ? (
+              <Button
+                icon={looking ? "progress_activity" : "explore_nearby"}
+                disabled={looking}
+                onClick={runLookup}
+              >
+                {looking ? "Looking up…" : "Look up address"}
+              </Button>
+            ) : null}
             <a
               href={searchUrl(address, postcode, code)}
               target="_blank"
@@ -157,11 +221,33 @@ function AddressForm({
             </a>
           </div>
           <p className="mb-3 text-caption text-ink-subtle">
-            No geocoding key is set, so this address cannot be resolved
-            automatically. Open it in Google Maps, right-click the exact spot,
-            copy the coordinates and paste them below — a full Maps URL works
-            too.
+            {geocodingReady
+              ? "Look up the address for a pin, or drop one in Google Maps, right-click the exact spot and paste the coordinates below. A town-centre match is refused — it would sit inside the geofence."
+              : "No geocoding key is set, so this address cannot be resolved automatically. Open it in Google Maps, right-click the exact spot, copy the coordinates and paste them below — a full Maps URL works too."}
           </p>
+
+          {lookup ? (
+            lookup.ok ? (
+              <p className="mb-3 flex items-start gap-1.5 rounded-sm border border-ok-border bg-ok-soft px-3 py-2 text-caption text-ink-muted">
+                <Icon name="check_circle" className="mt-px text-[14px] text-ok" />
+                <span>
+                  Matched{lookup.matchedBy === "eircode" ? " via Eircode" : ""}:{" "}
+                  <span className="text-ink">
+                    {lookup.formatted ?? "coordinates filled in below"}
+                  </span>
+                  {lookup.message ? ` — ${lookup.message}` : ""}
+                </span>
+              </p>
+            ) : (
+              <p className="mb-3 flex items-start gap-1.5 rounded-sm border border-warn-border bg-warn-soft px-3 py-2 text-caption text-ink-muted">
+                <Icon name="error" className="mt-px text-[14px] text-warn" />
+                <span>
+                  {lookup.message ?? "No usable match."} Place it by hand from
+                  Google Maps instead.
+                </span>
+              </p>
+            )
+          ) : null}
 
           <Field label="Paste from Google Maps" htmlFor="fix-paste">
             <input
@@ -204,6 +290,14 @@ function AddressForm({
               />
             </Field>
           </div>
+
+          {pointUnchanged ? (
+            <p className="mt-3 flex items-start gap-1.5 text-caption text-ink-subtle">
+              <Icon name="info" className="mt-px text-[14px]" />
+              Still the original drop-off point. Look up the new address or paste
+              a pin to move it.
+            </p>
+          ) : null}
 
           {check?.level === "transposed" ? (
             <div className="mt-3 flex flex-wrap items-center gap-3 rounded-sm border border-warn-border bg-warn-soft px-3 py-2.5">
@@ -256,12 +350,14 @@ function AddressForm({
       <footer className="flex flex-wrap items-center gap-2 border-t border-hairline px-6 py-3">
         <p className="mr-auto max-w-xs text-caption text-ink-subtle">
           {point
-            ? "The stop will appear on the fleet map and can be routed to."
+            ? redirecting
+              ? "The stop moves to the new point on the fleet map."
+              : "The stop will appear on the fleet map and can be routed to."
             : "A coordinate is required — the geofence needs a point, not an address."}
         </p>
         <Button onClick={onClose}>Cancel</Button>
         <Button variant="primary" icon="save" disabled={!point} onClick={save}>
-          Save address
+          {redirecting ? "Save new address" : "Save address"}
         </Button>
       </footer>
     </>
@@ -271,11 +367,14 @@ function AddressForm({
 export function FixAddressesDialog({
   orders,
   startWith,
+  geocodingReady,
   onSave,
   onClose,
 }: {
+  /** The order(s) the dialog steps through — the ungeocoded batch, or one row. */
   orders: Order[];
   startWith?: string | null;
+  geocodingReady: boolean;
   onSave: (orderId: string, patch: AddressPatch) => void;
   onClose: () => void;
 }) {
@@ -297,6 +396,10 @@ export function FixAddressesDialog({
   const order = orders[safeIndex];
   if (!order) return null;
 
+  const batch = orders.length > 1;
+  const redirecting = order.delivery_location !== null;
+  const title = redirecting && !batch ? "Change delivery address" : "Fix delivery address";
+
   return (
     <>
       <div
@@ -307,24 +410,26 @@ export function FixAddressesDialog({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Fix delivery address"
+        aria-label={title}
         className="fixed inset-x-4 top-[5vh] z-50 mx-auto flex max-h-[90vh] max-w-2xl flex-col overflow-hidden rounded-lg border border-hairline bg-surface shadow-pop"
       >
         <header className="flex items-start justify-between gap-3 border-b border-hairline px-6 py-4">
           <div className="min-w-0">
             <p className="font-mono text-label uppercase text-ink-subtle">
-              {orders.length > 1
+              {batch
                 ? `${safeIndex + 1} of ${orders.length} to fix`
-                : "Needs coordinates"}
+                : redirecting
+                  ? "Redirect delivery"
+                  : "Needs coordinates"}
             </p>
-            <h2 className="text-title text-ink">Fix delivery address</h2>
+            <h2 className="text-title text-ink">{title}</h2>
             <p className="mt-0.5 truncate text-body-sm text-ink-muted">
               <span className="font-mono text-data-sm">{order.crm_order_id}</span>{" "}
               · {order.customer_name}
             </p>
           </div>
           <div className="flex items-center gap-1">
-            {orders.length > 1 ? (
+            {batch ? (
               <>
                 <Button
                   icon="chevron_left"
@@ -354,6 +459,7 @@ export function FixAddressesDialog({
         <AddressForm
           key={order.id}
           order={order}
+          geocodingReady={geocodingReady}
           onSave={onSave}
           onClose={onClose}
         />
