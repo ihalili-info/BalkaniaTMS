@@ -15,11 +15,13 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { privacySettings } from "@/lib/integrations/policy";
 import { getGpsFeedHealth } from "@/lib/data/gps-feed";
 import { getCrmFeedHealth } from "@/lib/data/crm-feed";
+import { getInvoiceFeedHealth } from "@/lib/data/invoice-feed";
 import { deriveStatus, loadConnectorStates } from "@/lib/integrations/store";
 
 import { ConnectorCard } from "./connector-card";
 import { GpsFeedCard } from "./gps-feed-card";
 import { CrmFeedCard } from "./crm-feed-card";
+import { InvoiceFeedCard } from "./invoice-feed-card";
 import { TestConnectionsButton } from "./test-connections-button";
 
 import { AlertRules } from "./alert-rules";
@@ -35,6 +37,9 @@ export default async function IntegrationSettingsPage() {
   const gpsHealth = await getGpsFeedHealth();
   const crmHealth = await getCrmFeedHealth(
     states.find((s) => s.connector.id === "crm")?.config.enabled === true,
+  );
+  const invoiceHealth = await getInvoiceFeedHealth(
+    states.find((s) => s.connector.id === "invoices")?.config.enabled === true,
   );
   const user = await getCurrentUser();
   const canEdit = user !== null;
@@ -96,6 +101,8 @@ export default async function IntegrationSettingsPage() {
       <GpsFeedCard health={gpsHealth} now={new Date()} />
 
       <CrmFeedCard health={crmHealth} now={new Date()} />
+
+      <InvoiceFeedCard health={invoiceHealth} now={new Date()} />
 
       <AlertRules />
 

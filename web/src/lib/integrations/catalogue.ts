@@ -253,6 +253,26 @@ export const CONNECTORS: Connector[] = [
     ],
   },
   {
+    id: "invoices",
+    name: "Invoice ingestion",
+    purpose:
+      "Receives the sales invoice for each delivery from the ERP — header, line items and the VAT summary — so the driver can present it at the door and the customer can sign for it.",
+    icon: "receipt_long",
+    status: "not_configured",
+    envVars: ["INVOICE_WEBHOOK_SECRET"],
+    secrets: ["INVOICE_WEBHOOK_SECRET"],
+    endpoint: "POST /api/webhooks/invoices",
+    note: "Bearer auth on its own secret, separate from the order feed so the two rotate independently. Body is `{ \"invoices\": [...] }` (or a bare array / single object) — see the contract in lib/invoices/payload.ts. The TMS never computes money: every price, rate and total is stored exactly as the ERP sent it, and lines that do not add up to the ERP's own total are flagged, not corrected. An invoice whose `crm_order_id` has no matching order lands unmatched and links itself when the order arrives — until then no driver can see it, so watch the unmatched count. `\"voided\": true` marks an invoice withdrawn; it is never deleted, because it is a six-year financial record.",
+    fields: [
+      {
+        key: "enabled",
+        label: "Accept invoice pushes",
+        kind: "toggle",
+        help: "A soft switch for the operator's own reference — the route authenticates on INVOICE_WEBHOOK_SECRET regardless. Turn off while the connector is being reconfigured.",
+      },
+    ],
+  },
+  {
     id: "geocoding",
     name: "Geocoding",
     purpose: "Turns street addresses into GEOGRAPHY(POINT, 4326).",
@@ -368,6 +388,7 @@ export const DEFAULT_CONFIG: Record<string, Record<string, string | number | boo
     template_delivery_complete: "8c42ada4-eceb-45bb-8a80-0d2672aaa2e1",
   },
   crm: { enabled: false },
+  invoices: { enabled: false },
   shortio: {},
   geocoding: { provider: "none" },
   routing: { provider: "none" },
