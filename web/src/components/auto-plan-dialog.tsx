@@ -73,6 +73,12 @@ export function AutoPlanDialog({
   const [dropped, setDropped] = useState<Set<number>>(new Set());
   const [overrides, setOverrides] = useState<Record<number, string>>({});
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
+  // Dispatcher-adjusted stop sequence per group, keyed by group index (same
+  // keying as `dropped`/`overrides`). Holds the ordered stop ids; discarded
+  // in favour of the planner's own order the moment the group's stop set no
+  // longer matches (a radius/max-stops change, or a drop being removed) —
+  // see `orderedStops`.
+  const [stopOrder, setStopOrder] = useState<Record<number, string[]>>({});
   const [geocoding, startGeocode] = useTransition();
   const [creating, startCreate] = useTransition();
 
@@ -173,11 +179,33 @@ export function AutoPlanDialog({
     .map((load, index) => ({ load, index }))
     .filter(({ index }) => !dropped.has(index));
 
+  // The planner's own sequence, unless the dispatcher has dragged stops
+  // around for this group *and* the set of stop ids still matches — if a
+  // stop was removed or the groups recomputed, the manual order no longer
+  // applies to anything and the planner's order wins again.
+  const orderedStops = (load: ProposedLoad, index: number) => {
+    const manual = stopOrder[index];
+    if (!manual || manual.length !== load.stops.length) return load.stops;
+    const byId = new Map(load.stops.map((s) => [s.id, s]));
+    if (!manual.every((id) => byId.has(id))) return load.stops;
+    return manual.map((id) => byId.get(id)!);
+  };
+
+  const moveStop = (load: ProposedLoad, index: number, stopId: string, direction: -1 | 1) => {
+    const current = orderedStops(load, index).map((s) => s.id);
+    const pos = current.indexOf(stopId);
+    const swapWith = pos + direction;
+    if (pos === -1 || swapWith < 0 || swapWith >= current.length) return;
+    const next = [...current];
+    [next[pos], next[swapWith]] = [next[swapWith], next[pos]];
+    setStopOrder((prev) => ({ ...prev, [index]: next }));
+  };
+
   const mapGroups: PlanMapGroup[] = plan.loads.map((load, index) => ({
     index,
     colour: groupColour(index),
     dropped: dropped.has(index),
-    stops: load.stops.map((s) => ({
+    stops: orderedStops(load, index).map((s) => ({
       lat: s.delivery_location!.lat,
       lng: s.delivery_location!.lng,
       name: s.customer_name,
@@ -206,7 +234,7 @@ export function AutoPlanDialog({
       const result = await commitPlan(
         creatable.map(({ load, index }) => ({
           truckId: truckFor(load, index),
-          orderIds: load.stops.map((s) => s.id),
+          orderIds: orderedStops(load, index).map((s) => s.id),
           cmrNumber: null,
         })),
       );
@@ -229,7 +257,7 @@ export function AutoPlanDialog({
         role="dialog"
         aria-modal="true"
         aria-label="Auto-plan loads"
-        className="fixed inset-x-3 top-[3vh] z-50 mx-auto flex max-h-[94vh] max-w-6xl flex-col overflow-hidden rounded-lg border border-hairline bg-surface shadow-pop"
+        className="fixed inset-x-3 top-[2vh] z-50 mx-auto flex max-h-[96vh] max-w-[100rem] flex-col overflow-hidden rounded-lg border border-hairline bg-surface shadow-pop"
       >
         <header className="flex items-start justify-between gap-3 border-b border-hairline px-6 py-4">
           <div>
@@ -243,8 +271,8 @@ export function AutoPlanDialog({
                 ? `${plannableOrders.length} of ${orders.length} selected orders`
                 : `${orders.length} selected order${orders.length === 1 ? "" : "s"}`}{" "}
               by how close the drops are, and sequences each run from the depot
-              outwards. Remove a drop with the ✕ on its row to leave it in the
-              queue.
+              outwards. Use the arrows to move a drop up or down, or the ✕ to
+              remove it and leave it in the queue.
             </p>
           </div>
           <button
@@ -465,7 +493,7 @@ export function AutoPlanDialog({
               Nothing to group yet. Orders need coordinates first.
             </p>
           ) : (
-            <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start lg:gap-6">
+            <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_28rem] lg:items-start lg:gap-6">
               {/* Group + order adjustments — the left pane from lg up, a
                   toggled full-width view below it. */}
               <div
@@ -546,7 +574,7 @@ export function AutoPlanDialog({
                     </div>
 
                     <ol className="divide-y divide-hairline">
-                      {load.stops.map((stop, i) => (
+                      {orderedStops(load, index).map((stop, i, stops) => (
                         <li
                           key={stop.id}
                           className="flex items-center gap-3 px-4 py-2"
@@ -565,15 +593,37 @@ export function AutoPlanDialog({
                           <span className="shrink-0 font-mono text-data-sm text-ink-subtle">
                             {stop.crm_order_id}
                           </span>
-                          <button
-                            type="button"
-                            aria-label={`Remove ${stop.customer_name} from the plan`}
-                            title="Remove this drop — it stays in the queue"
-                            onClick={() => excludeOrder(stop.id)}
-                            className="shrink-0 rounded-sm p-1 text-ink-subtle transition-colors hover:bg-danger-soft hover:text-danger"
-                          >
-                            <Icon name="close" className="text-[15px]" />
-                          </button>
+                          <div className="flex shrink-0 items-center">
+                            <button
+                              type="button"
+                              aria-label={`Move ${stop.customer_name} up`}
+                              title="Move up"
+                              disabled={i === 0}
+                              onClick={() => moveStop(load, index, stop.id, -1)}
+                              className="rounded-sm p-1 text-ink-subtle transition-colors hover:bg-surface-muted hover:text-ink disabled:pointer-events-none disabled:opacity-30"
+                            >
+                              <Icon name="arrow_upward" className="text-[15px]" />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Move ${stop.customer_name} down`}
+                              title="Move down"
+                              disabled={i === stops.length - 1}
+                              onClick={() => moveStop(load, index, stop.id, 1)}
+                              className="rounded-sm p-1 text-ink-subtle transition-colors hover:bg-surface-muted hover:text-ink disabled:pointer-events-none disabled:opacity-30"
+                            >
+                              <Icon name="arrow_downward" className="text-[15px]" />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Remove ${stop.customer_name} from the plan`}
+                              title="Remove this drop — it stays in the queue"
+                              onClick={() => excludeOrder(stop.id)}
+                              className="rounded-sm p-1 text-ink-subtle transition-colors hover:bg-danger-soft hover:text-danger"
+                            >
+                              <Icon name="close" className="text-[15px]" />
+                            </button>
+                          </div>
                         </li>
                       ))}
                     </ol>
@@ -603,13 +653,13 @@ export function AutoPlanDialog({
                     apiKey={mapsKey}
                     depot={DEPOT_LATLNG}
                     groups={mapGroups}
-                    heightClass="h-[24rem] lg:h-[34rem]"
+                    heightClass="h-[24rem] lg:h-[42rem]"
                   />
                 ) : (
                   <PlanMap
                     depot={DEPOT_LATLNG}
                     groups={mapGroups}
-                    heightClass="h-[24rem] lg:h-[34rem]"
+                    heightClass="h-[24rem] lg:h-[42rem]"
                   />
                 )}
                 <p className="mt-2 text-caption text-ink-subtle">
