@@ -1,5 +1,5 @@
 import { haversineMeters } from "@/lib/format";
-import { routeLeg, routingConfigured } from "@/lib/routing/google";
+import { routeLeg, routingConfigured, type RouteLeg } from "@/lib/routing/google";
 import { createClient } from "@/lib/supabase/server";
 import { customsRegime, HOME_COUNTRY, type CountryCode } from "@/lib/regions";
 import type {
@@ -286,6 +286,21 @@ export async function getLoads(
 }
 
 /**
+ * How long a routed ETA is reused before asking Google again, keyed on
+ * `truck_id:stop_id`. Bounded below by the GPS push cadence (one fix per
+ * vehicle every 3-5 minutes, see the telematics note in the architecture
+ * doc) — a routed ETA cannot be fresher than the position it was computed
+ * from, so re-billing Google on every board render between fixes buys no
+ * real freshness. A serverless instance's cache is process-local and
+ * disappears on a cold start, so this is a best-effort throttle, not a
+ * correctness guarantee — which is fine, it only ever trades a few extra
+ * Google calls for staleness, never the other way round.
+ */
+const ROUTED_ETA_TTL_MS = 4 * 60 * 1000;
+
+const routedEtaCache = new Map<string, { leg: RouteLeg; expiresAt: number }>();
+
+/**
  * Replaces the straight-line ETA with a real road drive-time for the one stop
  * that matters: the next undelivered stop of each *active* load, from where its
  * truck is right now.
@@ -307,21 +322,36 @@ async function attachRoutedEtas(views: LoadView[]): Promise<void> {
   const targets = views
     .filter((v) => v.status === "active" && v.truck?.current_location)
     .map((v) => ({
+      truckId: v.truck!.id,
       from: v.truck!.current_location!,
       stop: v.stops.find(
         (s) => s.delivered_at === null && s.order.delivery_location,
       ),
     }))
-    .filter((t): t is { from: LatLng; stop: Stop } => t.stop !== undefined);
+    .filter(
+      (t): t is { truckId: string; from: LatLng; stop: Stop } =>
+        t.stop !== undefined,
+    );
+
+  const now = Date.now();
 
   await Promise.all(
-    targets.map(async ({ from, stop }) => {
+    targets.map(async ({ truckId, from, stop }) => {
+      const cacheKey = `${truckId}:${stop.id}`;
+      const cached = routedEtaCache.get(cacheKey);
+      if (cached && cached.expiresAt > now) {
+        stop.drive_seconds = cached.leg.durationSeconds;
+        stop.eta_source = "routed";
+        return;
+      }
+
       const { leg } = await routeLeg(from, stop.order.delivery_location!, {
         trafficAware: true,
       });
       if (leg) {
         stop.drive_seconds = leg.durationSeconds;
         stop.eta_source = "routed";
+        routedEtaCache.set(cacheKey, { leg, expiresAt: now + ROUTED_ETA_TTL_MS });
       }
     }),
   );
