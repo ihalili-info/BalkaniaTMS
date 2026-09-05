@@ -1420,74 +1420,93 @@ export interface RoadMatrixResult {
   routed: boolean;
   message: string | null;
   /**
-   * Road legs keyed `"{fromKey}|{toKey}"` (see `coordKey`), covering every
-   * ordered pair among the depot and the located drops. Missing pair = no
-   * route found; the planner falls back to a straight line for it.
+   * Road legs keyed `"{fromKey}|{toKey}"` (see `coordKey`). Missing pair = not
+   * bought or no route found; the planner falls back to a straight line for it.
    */
   legs: Record<string, RouteLeg>;
 }
 
 /**
- * Resolves a road distance/time matrix over the depot and a set of orders, for
- * the auto-planner to sequence against real roads instead of great-circle
- * lines.
+ * Buys road legs for the auto-planner, one small matrix per proposed group.
  *
- * Computed once per plan and handed to the client as a plain lookup — the
- * planner itself never touches the network, so the radius and max-stops knobs
- * stay instant. Traffic is not considered: a plan is built well before the
- * truck rolls.
+ * **Only the pairs the planner actually reads.** `cluster()` groups on
+ * great-circle distance against a moving centroid, so the grouping needs no
+ * road data at all; `sequence()` and `routeStats()` then read depot→stop and
+ * stop→stop pairs *within a group*. A cross-group pair — a Cork drop against a
+ * Belfast one — is never looked at. Asking Google for the full N×N matrix
+ * therefore billed roughly six elements for every one consumed, which is what
+ * put €174 of Compute Route Matrix on a single month's bill.
+ *
+ * Each group costs `(stops + 1)²` elements instead, and the caller passes only
+ * the groups it has not already bought, so moving the radius and max-stops
+ * knobs re-uses everything paid for so far.
+ *
+ * Traffic is not considered: a plan is built well before the truck rolls.
  *
  * Degrades quietly. No key, spent quota or a network blip returns
  * `routed: false` and the planner carries on with straight lines.
  */
-export async function roadMatrixForOrders(
-  orderIds: string[],
+export async function roadLegsForGroups(
+  groups: string[][],
 ): Promise<RoadMatrixResult> {
   try {
     await requireSession();
     if (!routingConfigured()) {
       return { routed: false, message: null, legs: {} };
     }
-    if (orderIds.length === 0) {
-      return { routed: false, message: "Nothing selected.", legs: {} };
+
+    const ids = [...new Set(groups.flat())].slice(0, GEOCODE_BATCH_LIMIT);
+    if (ids.length === 0) {
+      return { routed: false, message: "Nothing to route.", legs: {} };
     }
 
     const supabase = await createClient();
     const { data: rows, error } = await supabase
       .from("orders_geo")
       .select("id, lat, lng")
-      .in("id", orderIds.slice(0, GEOCODE_BATCH_LIMIT));
+      .in("id", ids);
     if (error) return { routed: false, message: error.message, legs: {} };
 
-    const depot: LatLng = { lat: DEPOT.lat, lng: DEPOT.lng };
-    const located: LatLng[] = [depot];
+    const byId = new Map<string, LatLng>();
     for (const r of rows ?? []) {
       if (typeof r.lat === "number" && typeof r.lng === "number") {
-        located.push({ lat: r.lat, lng: r.lng });
+        byId.set(r.id, { lat: r.lat, lng: r.lng });
       }
     }
-    // One drop plus the depot is the least that can form a run; below that
-    // there is nothing to sequence.
-    if (located.length < 3) {
-      return { routed: false, message: null, legs: {} };
-    }
 
-    const { matrix, failure } = await routeMatrix(located, located);
-    if (failure) {
-      return { routed: false, message: ROUTING_MESSAGE[failure], legs: {} };
-    }
-
+    const depot: LatLng = { lat: DEPOT.lat, lng: DEPOT.lng };
     const legs: Record<string, RouteLeg> = {};
-    for (let i = 0; i < located.length; i += 1) {
-      for (let j = 0; j < located.length; j += 1) {
-        const leg = matrix[i]?.[j];
-        if (i !== j && leg) {
-          legs[`${coordKey(located[i])}|${coordKey(located[j])}`] = leg;
+    let message: string | null = null;
+
+    for (const group of groups) {
+      const points: LatLng[] = [depot];
+      for (const id of group) {
+        const p = byId.get(id);
+        if (p) points.push(p);
+      }
+      // Depot plus one drop is the smallest run there is — it still needs the
+      // out-and-back legs for the round-trip figure.
+      if (points.length < 2) continue;
+
+      const { matrix, failure } = await routeMatrix(points, points);
+      // One group failing must not throw away the groups that succeeded; the
+      // planner straight-lines whatever is missing and the dialog says so.
+      if (failure) {
+        message ??= ROUTING_MESSAGE[failure];
+        continue;
+      }
+
+      for (let i = 0; i < points.length; i += 1) {
+        for (let j = 0; j < points.length; j += 1) {
+          const leg = matrix[i]?.[j];
+          if (i !== j && leg) {
+            legs[`${coordKey(points[i])}|${coordKey(points[j])}`] = leg;
+          }
         }
       }
     }
 
-    return { routed: Object.keys(legs).length > 0, message: null, legs };
+    return { routed: Object.keys(legs).length > 0, message, legs };
   } catch (e) {
     return { routed: false, message: (e as Error).message, legs: {} };
   }

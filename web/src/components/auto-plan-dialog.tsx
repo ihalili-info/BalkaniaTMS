@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import {
@@ -16,7 +16,7 @@ import {
 import {
   commitPlan,
   geocodeOrders,
-  roadMatrixForOrders,
+  roadLegsForGroups,
   type GeocodeLine,
 } from "@/lib/data/mutations";
 import { coordKey, formatDistance } from "@/lib/format";
@@ -37,6 +37,22 @@ import type { LatLng, Order, RouteLeg, Truck } from "@/lib/types";
 
 /** Stable reference so map effects do not redraw on every render. */
 const DEPOT_LATLNG: LatLng = { lat: DEPOT.lat, lng: DEPOT.lng };
+
+/**
+ * Road legs bought from Google, held for the life of the page.
+ *
+ * Deliberately outside the component: the dialog unmounts when it closes, so
+ * per-mount state meant closing and reopening it re-bought every leg. A leg is
+ * safe to keep — `routeMatrix` is traffic-unaware, so the road distance
+ * between two fixed points does not drift, and correcting an address moves the
+ * coordinate and therefore the key.
+ */
+const legCache: Record<string, RouteLeg> = {};
+
+/** Groups already paid for, so a second look at the same one is free. */
+const boughtGroups = new Set<string>();
+
+const groupKey = (orderIds: string[]) => [...orderIds].sort().join(",");
 
 /**
  * Auto-plan: geocode, then group by geography, then review.
@@ -112,54 +128,66 @@ export function AutoPlanDialog({
     (o) => o.delivery_location === null && !onLoad.has(o.id),
   );
 
-  // Road distances for the drops we can actually plan. Resolved once per set of
-  // located orders (a server round-trip that bills Google), then held and
-  // reused as the radius / max-stops knobs move — those must stay instant.
-  const locatedKey = useMemo(
-    () =>
-      orders
-        .filter((o) => o.delivery_location !== null && !onLoad.has(o.id))
-        .map((o) => o.id)
-        .sort()
-        .join(","),
-    [orders, onLoad],
-  );
-
-  // `forKey` records which set of drops the matrix was built for, so a matrix
-  // left over from a previous selection is ignored rather than reset in the
-  // effect body (which would be a synchronous cascading render).
-  const [road, setRoad] = useState<{
-    forKey: string;
-    legs: Record<string, RouteLeg> | null;
-    note: string | null;
-  } | null>(null);
+  // Seeded from the session cache, so reopening the dialog costs nothing for
+  // groups already paid for.
+  const [legs, setLegs] = useState<Record<string, RouteLeg>>(() => ({
+    ...legCache,
+  }));
+  const [routingNote, setRoutingNote] = useState<string | null>(null);
   const [routing, startRouting] = useTransition();
-  const requestedKey = useRef<string | null>(null);
+
+  // A free pass with no road geometry, purely to learn the groups. `cluster()`
+  // compares against a straight-line centroid, so the grouping it produces is
+  // the same one the routed plan below will land on — and because this pass
+  // never reads `legs`, buying legs cannot change it. That is what stops a
+  // fetch → replan → fetch loop.
+  const freePlan = useMemo(
+    () =>
+      planLoads({
+        orders: plannableOrders,
+        trucks,
+        depot: DEPOT_LATLNG,
+        originCountry: HOME_COUNTRY,
+        onLoadOrderIds: onLoad,
+        options,
+      }),
+    [plannableOrders, trucks, onLoad, options],
+  );
 
   useEffect(() => {
-    if (!locatedKey || locatedKey.split(",").length < 2) return;
-    if (requestedKey.current === locatedKey) return;
-    requestedKey.current = locatedKey;
-    startRouting(async () => {
-      const result = await roadMatrixForOrders(locatedKey.split(","));
-      setRoad({
-        forKey: locatedKey,
-        legs: result.routed ? result.legs : null,
-        note: result.message,
-      });
-    });
-  }, [locatedKey]);
+    const wanted = freePlan.loads
+      .map((load) => load.stops.map((s) => s.id))
+      .filter((ids) => ids.length > 0);
+    const unbought = wanted.filter((ids) => !boughtGroups.has(groupKey(ids)));
+    if (unbought.length === 0) return;
 
-  const matrix = road?.forKey === locatedKey ? road.legs : null;
-  const routingNote = road?.forKey === locatedKey ? road.note : null;
+    // Debounced, because the radius slider fires on every 5 km step and each
+    // step regroups. Buying on every intermediate grouping would cost more
+    // than the whole-matrix approach this replaced; only the setting the
+    // dispatcher actually settles on gets paid for.
+    const timer = setTimeout(() => {
+      startRouting(async () => {
+        const result = await roadLegsForGroups(unbought);
+        // Marked bought even on failure: retrying on every render would bill
+        // Google in a loop, and a group with no legs simply straight-lines.
+        for (const ids of unbought) boughtGroups.add(groupKey(ids));
+        Object.assign(legCache, result.legs);
+        setLegs((prev) => ({ ...prev, ...result.legs }));
+        setRoutingNote(result.message);
+      });
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [freePlan]);
+
   const geometry = useMemo<PlannerGeometry>(
     () =>
-      matrix
-        ? { leg: (a, b) => matrix[`${coordKey(a)}|${coordKey(b)}`] ?? null }
-        : {},
-    [matrix],
+      Object.keys(legs).length === 0
+        ? {}
+        : { leg: (a, b) => legs[`${coordKey(a)}|${coordKey(b)}`] ?? null },
+    [legs],
   );
-  const routed = matrix !== null;
+  const routed = Object.keys(legs).length > 0;
 
   const plan = useMemo(
     () =>
