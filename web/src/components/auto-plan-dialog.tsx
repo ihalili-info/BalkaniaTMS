@@ -493,7 +493,7 @@ export function AutoPlanDialog({
               Nothing to group yet. Orders need coordinates first.
             </p>
           ) : (
-            <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_28rem] lg:items-start lg:gap-6">
+            <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_42rem] lg:items-start lg:gap-6">
               {/* Group + order adjustments — the left pane from lg up, a
                   toggled full-width view below it. */}
               <div
