@@ -193,12 +193,34 @@ CREATE TABLE geocode_cache (
 -- payload). Both keep the raw payload only on failure — it carries personal
 -- data — and are purged on the notification retention window.
 
+-- Cache of traffic-aware Google Routes legs (truck -> its next undelivered
+-- stop), shared across serverless instances. A pure cache: a miss costs a
+-- Google call, never a wrong answer, and it may be truncated at any time.
+-- It exists because the previous throttle was an in-process Map, which on
+-- Vercel each instance keeps privately and loses on every cold start — and
+-- Link prefetch was server-rendering the board far more often than anyone
+-- opened it. Freshness is decided by the reader (ROUTED_ETA_TTL_MS), not here.
+CREATE TABLE routed_eta_cache (
+  truck_id UUID NOT NULL REFERENCES trucks(id) ON DELETE CASCADE,
+  load_item_id UUID NOT NULL REFERENCES load_items(id) ON DELETE CASCADE,
+  distance_m DOUBLE PRECISION NOT NULL,
+  duration_s INTEGER NOT NULL,
+  -- The position the leg was routed from. Diagnostic only — the TTL does the
+  -- invalidating; without this a stale-looking ETA cannot be explained later,
+  -- because trucks.current_location has long since moved on.
+  from_lat DOUBLE PRECISION NOT NULL,
+  from_lng DOUBLE PRECISION NOT NULL,
+  computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (truck_id, load_item_id)
+);
+
 -- Spatial indexes for efficient proximity queries
 CREATE INDEX idx_trucks_location ON trucks USING GIST (current_location);
 CREATE INDEX idx_trucks_features ON trucks USING GIN (features);
 CREATE INDEX idx_trucks_assignable ON trucks (id) WHERE availability = 'available';
 CREATE INDEX idx_orders_location ON orders USING GIST (delivery_location);
 CREATE INDEX idx_geocode_cache_last_used ON geocode_cache (last_used_at) WHERE source <> 'manual';
+CREATE INDEX idx_routed_eta_cache_computed_at ON routed_eta_cache (computed_at);
 ```
 
 ### Truck ownership split

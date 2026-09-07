@@ -47,6 +47,7 @@ import {
   type NavApp,
 } from "@/lib/navigation-links";
 import { CUSTOMS_REGIME } from "@/lib/regions";
+import { isPrefetchRequest } from "@/lib/prefetch";
 
 import { geocodingConfigured } from "@/lib/geocoding/google";
 import { shortioConfigured } from "@/lib/messaging/shortio";
@@ -394,7 +395,11 @@ function LoadCard({
 
 export default async function ActiveLoadsPage() {
   const now = new Date();
-  const loads = await getLoads({ routedEtas: true });
+  // A prefetch has no viewer, so it does not get a billed Google route — see
+  // `isPrefetchRequest`. The stops then carry `eta_source: "straight_line"`,
+  // which the UI already labels honestly.
+  const routedEtas = !(await isPrefetchRequest());
+  const loads = await getLoads({ routedEtas });
   const activeLoads = activeOf(loads);
   const plannedLoads = plannedOf(loads);
   const completedLoads = recentlyCompletedOf(loads, now);

@@ -10,6 +10,7 @@ import {
   stopsInGeofence,
 } from "@/lib/data/fleet";
 import { MAPS_KEY_VARS, googleMapsKey } from "@/lib/maps.server";
+import { isPrefetchRequest } from "@/lib/prefetch";
 import { SyncGpsButton } from "@/components/sync-gps";
 
 import { FleetMap } from "./fleet-map";
@@ -18,9 +19,13 @@ import { RealtimeStatus } from "./realtime-status";
 export const metadata: Metadata = { title: "Live Fleet Map" };
 
 export default async function LiveFleetMapPage() {
+  // A prefetch has no viewer, so it does not get a billed Google route — see
+  // `isPrefetchRequest`. The stops then carry `eta_source: "straight_line"`,
+  // which the UI already labels honestly.
+  const routedEtas = !(await isPrefetchRequest());
   const [trucks, loads, orders] = await Promise.all([
     getTrucks(),
-    getLoads({ routedEtas: true }),
+    getLoads({ routedEtas }),
     getOrders(),
   ]);
   const reporting = trucks.filter((t) => t.current_location !== null);

@@ -111,6 +111,14 @@ function Sidebar({
                   <li key={item.href}>
                     <Link
                       href={item.href}
+                      // Every dashboard route is dynamic and none has a
+                      // `loading.tsx`, so a prefetch renders the whole page on
+                      // the server. Seven nav links then meant seven full
+                      // renders per page view — including Active Loads and the
+                      // Live Fleet Map, which each bill Google for a
+                      // traffic-aware route. Navigation is a click, not a
+                      // hover; the renders were not.
+                      prefetch={false}
                       aria-current={active ? "page" : undefined}
                       className={cx(
                         "group relative flex items-center gap-2.5 rounded-sm px-2 py-2 text-body-sm transition-colors",
@@ -177,6 +185,9 @@ function Sidebar({
         <div className="flex items-center gap-1">
           <Link
             href="/account"
+            // Same reason as the module links above: the account page was being
+            // server-rendered as often as the board itself.
+            prefetch={false}
             aria-current={pathname.startsWith("/account") ? "page" : undefined}
             title="Account settings"
             className={cx(

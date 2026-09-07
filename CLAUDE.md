@@ -81,6 +81,12 @@ keep it and `supabase/migrations/` in sync.
     (delivered stops), on-time and last-active over the window, from
     `loads.driver_id`. Loads with no driver collapse to one "Unassigned" row.
     Drives the "Drivers" card on Analytics.
+  - `0020_routed_eta_cache.sql` — `routed_eta_cache`: traffic-aware Google
+    Routes legs (truck -> its next stop), keyed `(truck_id, load_item_id)`.
+    Pure cache, safe to truncate; freshness is the reader's call against
+    `ROUTED_ETA_TTL_MS`. Exists because the previous throttle was a `Map` in
+    one serverless instance's memory, which on Vercel is close to no throttle
+    at all — see "Routing & ETA" below.
 - `web/` — Next.js 16 (App Router, TypeScript, Tailwind v4) admin panel. See
   [web/README.md](web/README.md) for its layout and conventions.
   - `src/app/globals.css` — the entire design system as Tailwind v4 `@theme` tokens
@@ -723,6 +729,23 @@ maths with the UI saying so.
   undelivered stop of each *active* load**, traffic-aware. Every other stop
   keeps `estimateMinutes()`, and `Stop.eta_source` (`"routed"` /
   `"straight_line"`) says which; the UI labels it.
+- **A render is not a page view, and that is what costs money.** Every
+  dashboard route is dynamic and none has a `loading.tsx`, so Next's default
+  `<Link>` prefetch server-renders the *whole* page. Seven nav links meant
+  seven full renders per page view, Active Loads and the Live Fleet Map among
+  them — each billing Google for a traffic-aware route with nobody watching.
+  Production logs showed ~870 renders a day of those two routes against a
+  handful of real visits. Three things hold the line now, and all three are
+  load-bearing:
+  1. the nav rail sets **`prefetch={false}`** (`app-shell.tsx`);
+  2. `isPrefetchRequest()` (`lib/prefetch.ts`) makes a prefetch that slips
+     through fall back to straight-line ETAs — the backstop for any `<Link>`
+     added later;
+  3. the routed-ETA cache lives in **`routed_eta_cache`** (0020), shared by
+     every instance, with the in-process `Map` demoted to an L1 in front of it.
+  Before adding a `<Link>` to Active Loads or the Live Fleet Map, or a
+  `loading.tsx` that would make prefetch cheap again, know that this is what
+  you are touching.
 - **The geofence signal.** `isApproaching()` in `lib/fleet-selectors.ts` prefers
   a routed ETA (≤ `APPROACH_ETA_MINUTES`) and falls back to the 5 km
   straight-line ring. The Live Fleet Map still **draws** the 5 km ring from

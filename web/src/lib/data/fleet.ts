@@ -291,14 +291,38 @@ export async function getLoads(
  * vehicle every 3-5 minutes, see the telematics note in the architecture
  * doc) — a routed ETA cannot be fresher than the position it was computed
  * from, so re-billing Google on every board render between fixes buys no
- * real freshness. A serverless instance's cache is process-local and
- * disappears on a cold start, so this is a best-effort throttle, not a
- * correctness guarantee — which is fine, it only ever trades a few extra
- * Google calls for staleness, never the other way round.
+ * real freshness.
  */
 const ROUTED_ETA_TTL_MS = 4 * 60 * 1000;
 
-const routedEtaCache = new Map<string, { leg: RouteLeg; expiresAt: number }>();
+/**
+ * Two levels, because one was not enough.
+ *
+ * `routedEtaMemo` is process-local: it saves a database round trip when the
+ * same serverless instance renders the board twice inside the TTL, and that is
+ * all it is good for. On Vercel each instance keeps its own copy and a cold
+ * start begins empty, so on its own it barely throttles anything — the board is
+ * rendered far more often than it is looked at.
+ *
+ * `routed_eta_cache` (migration 0020) is the level that actually bounds the
+ * spend, because every instance shares it. Both are pure caches: a miss costs a
+ * Google call, never a wrong answer, and the table may be truncated at will.
+ */
+const routedEtaMemo = new Map<string, { leg: RouteLeg; expiresAt: number }>();
+
+interface EtaTarget {
+  truckId: string;
+  from: LatLng;
+  stop: Stop;
+}
+
+const etaKey = (t: EtaTarget) => `${t.truckId}:${t.stop.id}`;
+
+/** A routed leg is the one thing that lets a stop claim `eta_source: "routed"`. */
+function applyLeg(target: EtaTarget, leg: RouteLeg): void {
+  target.stop.drive_seconds = leg.durationSeconds;
+  target.stop.eta_source = "routed";
+}
 
 /**
  * Replaces the straight-line ETA with a real road drive-time for the one stop
@@ -319,7 +343,7 @@ const routedEtaCache = new Map<string, { leg: RouteLeg; expiresAt: number }>();
 async function attachRoutedEtas(views: LoadView[]): Promise<void> {
   if (!routingConfigured()) return;
 
-  const targets = views
+  const targets: EtaTarget[] = views
     .filter((v) => v.status === "active" && v.truck?.current_location)
     .map((v) => ({
       truckId: v.truck!.id,
@@ -329,32 +353,104 @@ async function attachRoutedEtas(views: LoadView[]): Promise<void> {
       ),
     }))
     .filter(
-      (t): t is { truckId: string; from: LatLng; stop: Stop } =>
-        t.stop !== undefined,
+      (t): t is EtaTarget => t.stop !== undefined,
     );
+  if (targets.length === 0) return;
 
   const now = Date.now();
 
-  await Promise.all(
-    targets.map(async ({ truckId, from, stop }) => {
-      const cacheKey = `${truckId}:${stop.id}`;
-      const cached = routedEtaCache.get(cacheKey);
-      if (cached && cached.expiresAt > now) {
-        stop.drive_seconds = cached.leg.durationSeconds;
-        stop.eta_source = "routed";
-        return;
-      }
+  /* --- level 1: this instance's memory --- */
+  const unmemoised = targets.filter((t) => {
+    const hit = routedEtaMemo.get(etaKey(t));
+    if (!hit || hit.expiresAt <= now) return true;
+    applyLeg(t, hit.leg);
+    return false;
+  });
+  if (unmemoised.length === 0) return;
 
-      const { leg } = await routeLeg(from, stop.order.delivery_location!, {
-        trafficAware: true,
+  const supabase = await createClient();
+
+  /* --- level 2: the shared table, one query for the whole board --- */
+  const shared = new Map<string, RouteLeg>();
+  try {
+    const { data } = await supabase
+      .from("routed_eta_cache")
+      .select("truck_id, load_item_id, distance_m, duration_s")
+      // Filtering both columns is a cross-product, not a list of pairs, so this
+      // can return legs for combinations nobody asked about. Harmless: the map
+      // is read by exact key and the extras are dropped.
+      .in("truck_id", [...new Set(unmemoised.map((t) => t.truckId))])
+      .in("load_item_id", unmemoised.map((t) => t.stop.id))
+      .gt("computed_at", new Date(now - ROUTED_ETA_TTL_MS).toISOString());
+
+    for (const row of data ?? []) {
+      shared.set(`${row.truck_id}:${row.load_item_id}`, {
+        distanceMeters: Number(row.distance_m),
+        durationSeconds: Number(row.duration_s),
       });
-      if (leg) {
-        stop.drive_seconds = leg.durationSeconds;
-        stop.eta_source = "routed";
-        routedEtaCache.set(cacheKey, { leg, expiresAt: now + ROUTED_ETA_TTL_MS });
-      }
+    }
+  } catch {
+    // The cache is an optimisation. If it is unreachable the board still
+    // renders — it just costs a Google call, which is the old behaviour.
+  }
+
+  const uncached = unmemoised.filter((t) => {
+    const leg = shared.get(etaKey(t));
+    if (!leg) return true;
+    applyLeg(t, leg);
+    routedEtaMemo.set(etaKey(t), { leg, expiresAt: now + ROUTED_ETA_TTL_MS });
+    return false;
+  });
+  if (uncached.length === 0) return;
+
+  /* --- level 3: Google, and only now --- */
+  const fresh: {
+    truck_id: string;
+    load_item_id: string;
+    distance_m: number;
+    duration_s: number;
+    from_lat: number;
+    from_lng: number;
+    computed_at: string;
+  }[] = [];
+
+  await Promise.all(
+    uncached.map(async (target) => {
+      const { leg } = await routeLeg(
+        target.from,
+        target.stop.order.delivery_location!,
+        { trafficAware: true },
+      );
+      if (!leg) return;
+
+      applyLeg(target, leg);
+      routedEtaMemo.set(etaKey(target), {
+        leg,
+        expiresAt: now + ROUTED_ETA_TTL_MS,
+      });
+      fresh.push({
+        truck_id: target.truckId,
+        load_item_id: target.stop.id,
+        distance_m: leg.distanceMeters,
+        duration_s: leg.durationSeconds,
+        from_lat: target.from.lat,
+        from_lng: target.from.lng,
+        computed_at: new Date().toISOString(),
+      });
     }),
   );
+
+  if (fresh.length === 0) return;
+
+  try {
+    // Best-effort. The ETAs are already on the board; failing to save them
+    // costs the next render a Google call, nothing more.
+    await supabase
+      .from("routed_eta_cache")
+      .upsert(fresh, { onConflict: "truck_id,load_item_id" });
+  } catch {
+    // Deliberately swallowed — see above.
+  }
 }
 
 /* --- pure selectors ---------------------------------------------------------
