@@ -1,5 +1,6 @@
 import { haversineMeters } from "@/lib/format";
-import { routeLeg, routingConfigured, type RouteLeg } from "@/lib/routing/google";
+import { routeLeg, routingConfigured, type RouteLeg } from "@/lib/routing/here";
+import { vehicleForTruck } from "@/lib/routing/vehicle";
 import { createClient } from "@/lib/supabase/server";
 import { customsRegime, HOME_COUNTRY, type CountryCode } from "@/lib/regions";
 import type {
@@ -153,7 +154,7 @@ const REGIME_RANK: Record<string, number> = {
  * board with twenty loads would otherwise make sixty round trips.
  *
  * `routedEtas` adds a real road drive-time for each active load's next stop —
- * one Google Routes call apiece. Off by default because `getLoads()` runs in
+ * one HERE routing call apiece. Off by default because `getLoads()` runs in
  * the dashboard layout on every navigation; only Active Loads and the Live
  * Fleet Map, which actually show an ETA, ask for it.
  */
@@ -286,12 +287,16 @@ export async function getLoads(
 }
 
 /**
- * How long a routed ETA is reused before asking Google again, keyed on
+ * How long a routed ETA is reused before asking the provider again, keyed on
  * `truck_id:stop_id`. Bounded below by the GPS push cadence (one fix per
  * vehicle every 3-5 minutes, see the telematics note in the architecture
  * doc) — a routed ETA cannot be fresher than the position it was computed
- * from, so re-billing Google on every board render between fixes buys no
- * real freshness.
+ * from, so re-billing on every board render between fixes buys no real
+ * freshness.
+ *
+ * The key includes the truck, which also keeps the cache correct now that a
+ * leg is routed against that vehicle's height, weight and ADR class: a leg
+ * computed for one truck can never be served to another.
  */
 const ROUTED_ETA_TTL_MS = 4 * 60 * 1000;
 
@@ -306,12 +311,14 @@ const ROUTED_ETA_TTL_MS = 4 * 60 * 1000;
  *
  * `routed_eta_cache` (migration 0020) is the level that actually bounds the
  * spend, because every instance shares it. Both are pure caches: a miss costs a
- * Google call, never a wrong answer, and the table may be truncated at will.
+ * routing call, never a wrong answer, and the table may be truncated at will.
  */
 const routedEtaMemo = new Map<string, { leg: RouteLeg; expiresAt: number }>();
 
 interface EtaTarget {
   truckId: string;
+  /** The whole row, not just the id — routing needs its height and weight. */
+  truck: Truck;
   from: LatLng;
   stop: Stop;
 }
@@ -329,13 +336,16 @@ function applyLeg(target: EtaTarget, leg: RouteLeg): void {
  * that matters: the next undelivered stop of each *active* load, from where its
  * truck is right now.
  *
- * Deliberately narrow. Routing every stop of every load would be a Google call
+ * Deliberately narrow. Routing every stop of every load would be a routing call
  * per stop on every board render; the only ETA a dispatcher acts on is the
  * next one, and only while the truck is actually moving. Planned loads and
  * downstream stops keep the `estimateMinutes()` figure, clearly labelled.
  *
- * Traffic-aware, because this is a live position. Fails soft — any error just
- * leaves `eta_source: "straight_line"`.
+ * Traffic-aware, because this is a live position, and routed on the **truck's
+ * own dimensions** — this is the one caller that knows which vehicle is
+ * running, so it is the one place the number accounts for the 4.0 m bridge and
+ * the weight limit rather than assuming a fleet default. Fails soft — any
+ * error just leaves `eta_source: "straight_line"`.
  *
  * `distance_m` is left alone — it stays the straight-line figure the Live Fleet
  * Map draws its 5 km ring from. Only `drive_seconds` is added.
@@ -347,6 +357,7 @@ async function attachRoutedEtas(views: LoadView[]): Promise<void> {
     .filter((v) => v.status === "active" && v.truck?.current_location)
     .map((v) => ({
       truckId: v.truck!.id,
+      truck: v.truck!,
       from: v.truck!.current_location!,
       stop: v.stops.find(
         (s) => s.delivered_at === null && s.order.delivery_location,
@@ -391,7 +402,7 @@ async function attachRoutedEtas(views: LoadView[]): Promise<void> {
     }
   } catch {
     // The cache is an optimisation. If it is unreachable the board still
-    // renders — it just costs a Google call, which is the old behaviour.
+    // renders — it just costs a routing call, which is the old behaviour.
   }
 
   const uncached = unmemoised.filter((t) => {
@@ -403,7 +414,7 @@ async function attachRoutedEtas(views: LoadView[]): Promise<void> {
   });
   if (uncached.length === 0) return;
 
-  /* --- level 3: Google, and only now --- */
+  /* --- level 3: HERE, and only now --- */
   const fresh: {
     truck_id: string;
     load_item_id: string;
@@ -419,7 +430,10 @@ async function attachRoutedEtas(views: LoadView[]): Promise<void> {
       const { leg } = await routeLeg(
         target.from,
         target.stop.order.delivery_location!,
-        { trafficAware: true },
+        // This truck's own gross weight, height, length and ADR class — the
+        // one place in the app where a routed number is for the actual
+        // vehicle rather than a fleet default.
+        { trafficAware: true, vehicle: vehicleForTruck(target.truck) },
       );
       if (!leg) return;
 
@@ -444,7 +458,7 @@ async function attachRoutedEtas(views: LoadView[]): Promise<void> {
 
   try {
     // Best-effort. The ETAs are already on the board; failing to save them
-    // costs the next render a Google call, nothing more.
+    // costs the next render a routing call, nothing more.
     await supabase
       .from("routed_eta_cache")
       .upsert(fresh, { onConflict: "truck_id,load_item_id" });

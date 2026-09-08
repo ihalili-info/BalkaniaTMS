@@ -10,7 +10,7 @@ import { headers } from "next/headers";
  * `loading.tsx` boundary is rendered in full. That is fine for a page that only
  * reads the database, and expensive for one that calls a metered third party.
  *
- * Active Loads and the Live Fleet Map both ask Google for a traffic-aware
+ * Active Loads and the Live Fleet Map both ask HERE for a traffic-aware
  * driving time on every render. A prefetch has nobody to show it to, and by the
  * time the navigation actually happens the answer would be re-fetched anyway
  * (Next's client router treats dynamic segments as stale immediately), so

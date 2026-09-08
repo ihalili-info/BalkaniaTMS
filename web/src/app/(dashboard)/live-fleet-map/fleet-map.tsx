@@ -3,7 +3,7 @@
 /**
  * Schematic fleet map.
  *
- * There is no tile provider wired up (no Mapbox/Google key), so this projects
+ * There is no tile provider wired up (no HERE key), so this projects
  * real coordinates onto a plain canvas rather than faking a basemap. The
  * projection is equirectangular in **kilometres**, which means the 5 km
  * geofence rings are drawn to true scale — the one thing a dispatcher has to
@@ -35,7 +35,7 @@ import { formatCoords, formatDistance, relativeTime } from "@/lib/format";
 import { DEFAULT_VIEW, DEPOT, REFERENCE_PLACES } from "@/lib/geo/reference";
 import type { LatLng, LoadView, Order, Truck } from "@/lib/types";
 
-import { GoogleCanvas } from "./google-canvas";
+import { HereCanvas } from "./here-canvas";
 
 const KM_PER_DEG_LAT = 110.574;
 const kmPerDegLng = (lat: number) => 111.32 * Math.cos((lat * Math.PI) / 180);
@@ -51,7 +51,7 @@ export function FleetMap({
   loads,
   pendingOrders,
   now,
-  googleMapsKey,
+  hereMapsKey,
 }: {
   trucks: Truck[];
   loads: LoadView[];
@@ -59,7 +59,7 @@ export function FleetMap({
   pendingOrders: Order[];
   now: Date;
   /** Absent → the schematic below, which is to scale but has no roads. */
-  googleMapsKey: string | null;
+  hereMapsKey: string | null;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(
     trucks[0]?.id ?? null,
@@ -186,14 +186,14 @@ export function FleetMap({
         <CardHeader
           title="Fleet positions"
           hint={
-            googleMapsKey
-              ? "Google basemap · 5 km geofence rings drawn on the sphere"
+            hereMapsKey
+              ? "HERE basemap · 5 km geofence rings drawn on the sphere"
               : "Equirectangular schematic · geofence rings drawn to true 5 km scale"
           }
           actions={
-            googleMapsKey ? (
+            hereMapsKey ? (
               <Badge tone="ok" dot>
-                Google Maps
+                HERE Maps
               </Badge>
             ) : (
               <Badge tone="warn" dot>
@@ -210,9 +210,9 @@ export function FleetMap({
               title="No positions yet"
               description="Every truck is waiting for its first GPS fix. Check that Vehicle Numbers are set in Reveal and that the webhook endpoint has been registered."
             />
-          ) : googleMapsKey ? (
-            <GoogleCanvas
-              apiKey={googleMapsKey}
+          ) : hereMapsKey ? (
+            <HereCanvas
+              apiKey={hereMapsKey}
               trucks={trucks}
               loads={loads}
               pendingOrders={pendingOrders}

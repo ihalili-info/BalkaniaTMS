@@ -49,9 +49,9 @@ import {
 import { CUSTOMS_REGIME } from "@/lib/regions";
 import { isPrefetchRequest } from "@/lib/prefetch";
 
-import { geocodingConfigured } from "@/lib/geocoding/google";
+import { geocodingConfigured } from "@/lib/geocoding/here";
 import { shortioConfigured } from "@/lib/messaging/shortio";
-import { googleMapsKey } from "@/lib/maps.server";
+import { hereMapsKey } from "@/lib/maps.server";
 
 import { DispatchActions } from "./dispatch-actions";
 import { LoadMenu } from "./load-menu";
@@ -201,7 +201,7 @@ function StopRow({
                 className="text-caption text-ink-subtle"
                 title={
                   routed
-                    ? "Road drive-time from the truck's current position (Google Routes, live traffic)"
+                    ? "Road drive-time from the truck's current position (HERE truck routing, live traffic)"
                     : "Straight-line estimate at 45 km/h — a display stand-in, not alert-grade"
                 }
               >
@@ -395,7 +395,7 @@ function LoadCard({
 
 export default async function ActiveLoadsPage() {
   const now = new Date();
-  // A prefetch has no viewer, so it does not get a billed Google route — see
+  // A prefetch has no viewer, so it does not get a billed routing call — see
   // `isPrefetchRequest`. The stops then carry `eta_source: "straight_line"`,
   // which the UI already labels honestly.
   const routedEtas = !(await isPrefetchRequest());
@@ -443,7 +443,7 @@ export default async function ActiveLoadsPage() {
             drivers={drivers}
             unassignedOrders={unassignedOrders}
             geocodingReady={geocodingConfigured()}
-            mapsKey={googleMapsKey()}
+            mapsKey={hereMapsKey()}
           />
         }
       />

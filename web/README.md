@@ -45,6 +45,10 @@ src/
     data/                   real reads (fleet, analytics) and mutations
     fleet-selectors.ts      pure selectors, usable from client components
     geo/reference.ts        depot + map landmarks
+    geocoding/here.ts       HERE Geocoding & Search — Eircode-first, refuses coarse
+    routing/here.ts         HERE Routing v8 — truck matrix + live traffic leg
+    routing/vehicle.ts      a Truck as HERE vehicle params (pure)
+    maps.ts                 HERE Maps JS loader (CDN, ordered) + design tokens
     integrations/           connector catalogue, config store, messaging policy
     supabase/               client / server / service-role helpers
 ```
@@ -74,11 +78,12 @@ src/
 - **Compliance numbers are planning aids.** The Reg. 561/2006 counters and
   `estimateMinutes()` help a dispatcher decide; the tachograph is the legal
   record. Never label the app's figures as proof of compliance.
-- **Routing degrades, never breaks.** `lib/routing/google.ts` (Google Routes,
-  `ROUTING_API_KEY`) gives auto-plan road distances and live truck ETAs; every
+- **Routing degrades, never breaks.** `lib/routing/here.ts` (HERE Routing v8,
+  `HERE_API_KEY`) gives auto-plan road distances and live truck ETAs; every
   path falls back to `haversineMeters` if the key is missing or a call fails,
-  and the UI marks which figure it is showing (`Stop.eta_source`). It is car
-  routing — `truckRoutingWarning()` still applies.
+  and the UI marks which figure it is showing (`Stop.eta_source`). It routes an
+  HGV (`transportMode=truck`, dimensions from `lib/routing/vehicle.ts`) — but
+  the driver's phone still does not, so `truckRoutingWarning()` still applies.
 
 ## Sending a driver their route
 

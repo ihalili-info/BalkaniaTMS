@@ -10,7 +10,7 @@
  * every distance here is a great-circle line — it knows nothing about roads,
  * ferries, one-way systems, the M50 at eight in the morning, or that Dublin to
  * Holyhead is a sailing and not a drive. Pass a `geometry.leg` accessor
- * (Google Routes, via a server action) and sequencing, route length and the
+ * (HERE Matrix Routing, via a server action) and sequencing, route length and the
  * quoted drive time switch to the road network; clustering stays geographic
  * because a cluster centroid is not a real place to route from. Either way the
  * output is a **proposal a dispatcher reviews**, never something that should

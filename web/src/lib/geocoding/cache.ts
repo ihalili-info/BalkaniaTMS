@@ -4,7 +4,7 @@ import "server-only";
  * The geocode cache — read/write helpers over the `geocode_cache` table
  * (migration 0012).
  *
- * The point of the cache is to stop paying — in Google lookups and in
+ * The point of the cache is to stop paying — in provider lookups and in
  * dispatcher attention — to resolve an address we have resolved before. The
  * point of *this* module is to keep the trust rules in one place:
  *
@@ -18,7 +18,7 @@ import "server-only";
  */
 
 import type { createClient } from "@/lib/supabase/server";
-import { compactEircode } from "@/lib/geocoding/google";
+import { compactEircode, type GeocodePrecision } from "@/lib/geocoding/here";
 import type { CountryCode } from "@/lib/regions";
 import type { LatLng } from "@/lib/types";
 
@@ -26,14 +26,27 @@ type ServerClient = Awaited<ReturnType<typeof createClient>>;
 
 export type CacheSource = "manual" | "rooftop" | "interpolated" | "geometric_center";
 
-/** Google's `location_type` → our `source`. Unknown / refused grades → null. */
-export function cacheSourceForPrecision(precision: string | null): CacheSource | null {
+/**
+ * A geocode's precision grade → the `source` stored on the cache row.
+ *
+ * The stored vocabulary is the migration's and does not move with the
+ * provider: `geometric_center` is the column value for a street-level match,
+ * whatever the geocoder calls it. A `postal_point` is an Eircode, which is a
+ * building — it is graded `rooftop` and reused directly, because that is
+ * exactly as trustworthy as a surveyed address point.
+ *
+ * Refused grades (`area`) return null: they are never written.
+ */
+export function cacheSourceForPrecision(
+  precision: GeocodePrecision | null,
+): CacheSource | null {
   switch (precision) {
-    case "ROOFTOP":
+    case "rooftop":
+    case "postal_point":
       return "rooftop";
-    case "RANGE_INTERPOLATED":
+    case "interpolated":
       return "interpolated";
-    case "GEOMETRIC_CENTER":
+    case "street":
       return "geometric_center";
     default:
       return null;

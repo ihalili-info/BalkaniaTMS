@@ -10,7 +10,7 @@ import {
   GEOCODE_MESSAGE,
   geocodeAddress,
   geocodingConfigured,
-} from "@/lib/geocoding/google";
+} from "@/lib/geocoding/here";
 import {
   cacheSourceForPrecision,
   isStrongCacheHit,
@@ -21,7 +21,8 @@ import {
   ROUTING_MESSAGE,
   routeMatrix,
   routingConfigured,
-} from "@/lib/routing/google";
+} from "@/lib/routing/here";
+import { DEFAULT_FLEET_VEHICLE } from "@/lib/routing/vehicle";
 import { coordKey } from "@/lib/format";
 import { DEPOT } from "@/lib/geo/reference";
 import { settleStopDelivered, syncLoadCompletion } from "@/lib/data/stop-delivery";
@@ -38,7 +39,7 @@ import { settleStopDelivered, syncLoadCompletion } from "@/lib/data/stop-deliver
 /**
  * How many addresses one call will resolve.
  *
- * Bounded by the server action's wall clock, not by Google's quota — each
+ * Bounded by the server action's wall clock, not by the provider's quota — each
  * lookup is a round trip, and an unbounded batch would time out mid-run with
  * some rows written and no report of which.
  */
@@ -334,7 +335,7 @@ export async function fixOrderAddress(
 export interface AddressGeocodePreview {
   ok: boolean;
   point: LatLng | null;
-  /** Google's normalised address, shown back so a wrong match is catchable. */
+  /** The provider's normalised address, shown back so a wrong match is catchable. */
   formatted: string | null;
   matchedBy: "eircode" | "address" | null;
   partial: boolean;
@@ -346,10 +347,10 @@ export interface AddressGeocodePreview {
  * delivery address" dialog, where the dispatcher is still editing and just
  * wants the pin filled in.
  *
- * Same precision bar as the import path: an `APPROXIMATE` match is refused
- * (`too_coarse`), because a town-centre point sits inside the 5 km geofence and
- * would fire the customer alert while the driver is streets away. When it comes
- * back empty the dialog falls back to the manual paste field.
+ * Same precision bar as the import path: a town- or district-level match is
+ * refused (`too_coarse`), because a town-centre point sits inside the 5 km
+ * geofence and would fire the customer alert while the driver is streets away.
+ * When it comes back empty the dialog falls back to the manual paste field.
  */
 export async function previewOrderGeocode(
   address: string,
@@ -389,7 +390,7 @@ export async function previewOrderGeocode(
       matchedBy: result.matchedBy,
       partial: result.partial,
       message: result.partial
-        ? "Google flagged this as a partial match — check the address it returned."
+        ? "HERE scored this as a loose match — check the address it returned."
         : null,
     };
   } catch (e) {
@@ -1240,7 +1241,7 @@ export interface GeocodeLine {
   detail: string;
   /**
    * The address string and postcode the lookup actually used — shown back so a
-   * failure is diagnosable. "Google found no match" against a blank or junk
+   * failure is diagnosable. "HERE found no match" against a blank or junk
    * address is a CRM/CSV mapping problem, not a geocoder problem, and the two
    * are indistinguishable without seeing what was searched.
    */
@@ -1256,20 +1257,20 @@ export interface GeocodeBatchResult extends WriteResult {
 /**
  * Resolves delivery addresses to coordinates.
  *
- * Capped and sequential. Google's per-second limit is generous but real, and a
+ * Capped and sequential. HERE's per-second limit is generous but real, and a
  * server action has a wall-clock budget — firing eighty parallel requests is
  * the reliable way to turn a working batch into a partial one with no record
  * of where it stopped. One at a time, reported per row, is slower and always
  * legible.
  *
- * Coarse matches are **not** written. `lib/geocoding/google.ts` explains why at
+ * Coarse matches are **not** written. `lib/geocoding/here.ts` explains why at
  * length; the short version is that a town-centre coordinate is invisible once
  * stored and fires customer alerts from the wrong place.
  *
- * The geocode cache (migration 0012) sits in front of Google: a strong hit —
- * a `manual` fix or a rooftop match seen before — is reused without a lookup;
- * a weak (`geometric_center`) hit is kept only as a fallback if Google fails;
- * every fresh success is written back for next time.
+ * The geocode cache (migration 0012) sits in front of the provider: a strong
+ * hit — a `manual` fix or a rooftop match seen before — is reused without a
+ * lookup; a weak (`geometric_center`) hit is kept only as a fallback if the
+ * lookup fails; every fresh success is written back for next time.
  */
 export async function geocodeOrders(ids: string[]): Promise<GeocodeBatchResult> {
   const empty = { located: 0, lines: [] as GeocodeLine[] };
@@ -1302,10 +1303,10 @@ export async function geocodeOrders(ids: string[]): Promise<GeocodeBatchResult> 
         postcode: (order.delivery_postcode as string | null) ?? null,
       };
 
-      // A blank address with no postcode is not something Google can be asked
-      // about — it means the order arrived without a delivery location, which
-      // is a field-mapping problem upstream (CRM connector or CSV import), not
-      // a geocoding one. Say that plainly rather than "no match".
+      // A blank address with no postcode is not something a geocoder can be
+      // asked about — it means the order arrived without a delivery location,
+      // which is a field-mapping problem upstream (CRM connector or CSV
+      // import), not a geocoding one. Say that plainly rather than "no match".
       if (base.queried.trim() === "" && (base.postcode ?? "").trim() === "") {
         lines.push({
           ...base,
@@ -1356,7 +1357,7 @@ export async function geocodeOrders(ids: string[]): Promise<GeocodeBatchResult> 
             });
           }
         } else if (cached) {
-          // Google gave nothing usable, but we have a weak cached point.
+          // The lookup gave nothing usable, but we have a weak cached point.
           // Better a known street centroid than leaving the order blank.
           point = cached.point;
           detail = `${cached.formatted ?? "matched"} · from a saved approximate location — check it`;
@@ -1388,7 +1389,7 @@ export async function geocodeOrders(ids: string[]): Promise<GeocodeBatchResult> 
         outcome: "located",
         // The normalised address is shown back deliberately: a match that
         // silently landed on the wrong Station Road is only catchable by
-        // reading what Google actually resolved to.
+        // reading what HERE actually resolved to.
         detail,
       });
     }
@@ -1433,15 +1434,21 @@ export interface RoadMatrixResult {
  * great-circle distance against a moving centroid, so the grouping needs no
  * road data at all; `sequence()` and `routeStats()` then read depot→stop and
  * stop→stop pairs *within a group*. A cross-group pair — a Cork drop against a
- * Belfast one — is never looked at. Asking Google for the full N×N matrix
- * therefore billed roughly six elements for every one consumed, which is what
- * put €174 of Compute Route Matrix on a single month's bill.
+ * Belfast one — is never looked at. Asking for the full N×N matrix therefore
+ * billed roughly six elements for every one consumed, which is what put €174 of
+ * route matrix on a single month's bill.
  *
  * Each group costs `(stops + 1)²` elements instead, and the caller passes only
  * the groups it has not already bought, so moving the radius and max-stops
  * knobs re-uses everything paid for so far.
  *
  * Traffic is not considered: a plan is built well before the truck rolls.
+ *
+ * **The truck is not known yet.** Grouping and sequencing happen before any
+ * vehicle is assigned — the planner picks trucks longest-run-first, afterwards
+ * — so the matrix routes against `DEFAULT_FLEET_VEHICLE`, a standard artic at
+ * the legal maximum. The live ETA in `lib/data/fleet.ts` does have a truck and
+ * uses its real dimensions; the two are deliberately not the same.
  *
  * Degrades quietly. No key, spent quota or a network blip returns
  * `routed: false` and the planner carries on with straight lines.
@@ -1488,7 +1495,9 @@ export async function roadLegsForGroups(
       // out-and-back legs for the round-trip figure.
       if (points.length < 2) continue;
 
-      const { matrix, failure } = await routeMatrix(points, points);
+      const { matrix, failure } = await routeMatrix(points, points, {
+        vehicle: DEFAULT_FLEET_VEHICLE,
+      });
       // One group failing must not throw away the groups that succeeded; the
       // planner straight-lines whatever is missing and the dialog says so.
       if (failure) {

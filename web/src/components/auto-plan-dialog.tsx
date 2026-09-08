@@ -32,14 +32,14 @@ import {
 } from "@/lib/load-planner";
 import { HOME_COUNTRY, requiresCmr } from "@/lib/regions";
 import { PlanMap, groupColour, type PlanMapGroup } from "@/components/plan-map";
-import { PlanGoogleMap } from "@/components/plan-google-map";
+import { PlanHereMap } from "@/components/plan-here-map";
 import type { LatLng, Order, RouteLeg, Truck } from "@/lib/types";
 
 /** Stable reference so map effects do not redraw on every render. */
 const DEPOT_LATLNG: LatLng = { lat: DEPOT.lat, lng: DEPOT.lng };
 
 /**
- * Road legs bought from Google, held for the life of the page.
+ * Road legs bought from HERE, held for the life of the page.
  *
  * Deliberately outside the component: the dialog unmounts when it closes, so
  * per-mount state meant closing and reopening it re-bought every leg. A leg is
@@ -75,9 +75,9 @@ export function AutoPlanDialog({
   orders: Order[];
   trucks: Truck[];
   loadRefByOrderId: Record<string, string>;
-  /** Whether GEOCODING_API_KEY is set — the button is honest about it if not. */
+  /** Whether HERE_API_KEY is set — the button is honest about it if not. */
   geocodingReady: boolean;
-  /** Google Maps browser key. Absent → the schematic map. */
+  /** HERE Maps browser key. Absent → the schematic map. */
   mapsKey?: string | null;
   onClose: () => void;
 }) {
@@ -169,7 +169,7 @@ export function AutoPlanDialog({
       startRouting(async () => {
         const result = await roadLegsForGroups(unbought);
         // Marked bought even on failure: retrying on every render would bill
-        // Google in a loop, and a group with no legs simply straight-lines.
+        // HERE in a loop, and a group with no legs simply straight-lines.
         for (const ids of unbought) boughtGroups.add(groupKey(ids));
         Object.assign(legCache, result.legs);
         setLegs((prev) => ({ ...prev, ...result.legs }));
@@ -332,8 +332,8 @@ export function AutoPlanDialog({
                   onClick={runGeocode}
                   title={
                     geocodingReady
-                      ? "Resolve these addresses with Google Geocoding"
-                      : "GEOCODING_API_KEY is not set on this deployment"
+                      ? "Resolve these addresses with HERE Geocoding"
+                      : "HERE_API_KEY is not set on this deployment"
                   }
                 >
                   {geocoding
@@ -344,7 +344,7 @@ export function AutoPlanDialog({
                   <span className="text-caption text-ink-muted">
                     Needs{" "}
                     <span className="font-mono text-data-sm">
-                      GEOCODING_API_KEY
+                      HERE_API_KEY
                     </span>{" "}
                     — a server-side key with no referrer restriction. Or place
                     them by hand with Fix addresses.
@@ -465,11 +465,12 @@ export function AutoPlanDialog({
                 "Resolving road distances…"
               ) : routed ? (
                 <>
-                  Distances and drive times are on real roads (Google Routes,
-                  live traffic excluded), ferries included. Still a{" "}
-                  <strong>car</strong> route — it does not know a 4.0 m bridge
-                  or a weight limit, so treat the sequence as a starting point
-                  and adjust it on the load.
+                  Distances and drive times are on real roads (HERE truck
+                  routing, live traffic excluded), ferries included. Routed for
+                  a <strong>standard 44 t artic at 4.65 m</strong>, not the
+                  truck that ends up running it — no vehicle is assigned until
+                  after grouping. Treat the sequence as a starting point and
+                  adjust it on the load.
                 </>
               ) : (
                 <>
@@ -677,7 +678,7 @@ export function AutoPlanDialog({
                 )}
               >
                 {mapsKey ? (
-                  <PlanGoogleMap
+                  <PlanHereMap
                     apiKey={mapsKey}
                     depot={DEPOT_LATLNG}
                     groups={mapGroups}

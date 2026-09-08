@@ -115,7 +115,7 @@ function Sidebar({
                       // `loading.tsx`, so a prefetch renders the whole page on
                       // the server. Seven nav links then meant seven full
                       // renders per page view — including Active Loads and the
-                      // Live Fleet Map, which each bill Google for a
+                      // Live Fleet Map, which each bill the routing provider for a
                       // traffic-aware route. Navigation is a click, not a
                       // hover; the renders were not.
                       prefetch={false}

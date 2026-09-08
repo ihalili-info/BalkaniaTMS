@@ -81,8 +81,10 @@ keep it and `supabase/migrations/` in sync.
     (delivered stops), on-time and last-active over the window, from
     `loads.driver_id`. Loads with no driver collapse to one "Unassigned" row.
     Drives the "Drivers" card on Analytics.
-  - `0020_routed_eta_cache.sql` — `routed_eta_cache`: traffic-aware Google
-    Routes legs (truck -> its next stop), keyed `(truck_id, load_item_id)`.
+  - `0020_routed_eta_cache.sql` — `routed_eta_cache`: traffic-aware routed
+    legs (truck -> its next stop), keyed `(truck_id, load_item_id)`. The truck
+    is in the key, which also keeps it correct now that a leg is routed against
+    that vehicle's own dimensions.
     Pure cache, safe to truncate; freshness is the reader's call against
     `ROUTED_ETA_TTL_MS`. Exists because the previous throttle was a `Map` in
     one serverless instance's memory, which on Vercel is close to no throttle
@@ -113,8 +115,11 @@ keep it and `supabase/migrations/` in sync.
   - `src/lib/data/` — the real read layer (`fleet.ts`, `analytics.ts`) and `mutations.ts`
   - `src/lib/fleet-selectors.ts` — pure selectors, safe for client components
   - `src/lib/geo/reference.ts` — depot + map landmarks (reference data, not fixtures)
-  - `src/lib/routing/google.ts` — Google Routes API client (road distance/time,
-    live-traffic single leg); falls back to great-circle on any failure
+  - `src/lib/routing/here.ts` — HERE Routing v8 client (road distance/time on
+    `transportMode=truck`, live-traffic single leg); falls back to great-circle
+    on any failure
+  - `src/lib/routing/vehicle.ts` — a `Truck` as HERE vehicle params (pure);
+    also `DEFAULT_FLEET_VEHICLE`, used when no truck is assigned yet
   - `src/lib/integrations/` — connector catalogue, config store, messaging policy
   - `src/lib/types.ts` — row types mirroring the migration
   - `src/lib/supabase/` — `client.ts` (browser), `server.ts` (RSC/route handlers, cookie-based), `service.ts` (service-role, server-only, bypasses RLS — for webhooks/cron)
@@ -162,7 +167,7 @@ a standalone CRM connector service. The contract is `lib/crm/payload.ts` — a
 pure module that mirrors `orders-import.ts` field for field. New refs insert;
 an existing ref updates **only while pending** (on a load ⇒ reported, not
 applied); `cancelled:true` removes a pending order (same rule as
-`deleteOrders`). Geocoding is supplied-coords → cache → Google (budgeted per
+`deleteOrders`). Geocoding is supplied-coords → cache → HERE (budgeted per
 request), otherwise the order queues like a failed CSV row. `crm-feed.ts` +
 the CRM feed card on Integration Settings read `crm_webhook_deliveries`.
 
@@ -301,7 +306,11 @@ Maps. The three are **not** equivalent and the UI must not imply they are:
 - **All three route cars, not HGVs.** None of them knows a 4.62 m trailer
   cannot pass under a 4.0 m bridge, or applies weight and ADR restrictions.
   `truckRoutingWarning()` states this at the point of handoff, checked against
-  the load's destination countries.
+  the load's destination countries. **This did not change when routing moved to
+  HERE.** The planner and the live ETA are now genuinely truck-aware
+  (`transportMode=truck`), which makes it easy to assume the driver's phone is
+  too. It is not: the deep link hands a destination to a consumer navigator and
+  nothing else. The warning stays.
 - **The sent route starts from the driver, not the truck.** `SendRouteDialog`
   builds the driver's links with **no `origin`**, so their navigation app
   starts from its own live GPS — which is what "start my run" should mean, and
@@ -547,7 +556,7 @@ review → create. `lib/load-planner.ts` is the whole algorithm and it is pure �
 no I/O, no clock — so it can be reasoned about and run standalone. The review
 step has two views: a **Groups** list and a **Map** — depot → each group's
 stops → depot, one colour per group, dropped groups dimmed. With a Maps browser
-key the Map is the Google basemap (`components/plan-google-map.tsx`); without
+key the Map is the HERE basemap (`components/plan-here-map.tsx`); without
 one it falls back to a dependency-free SVG schematic (`components/plan-map.tsx`).
 Either way the connectors are **straight lines** — the geometry the planner
 sequenced on, not a routed path.
@@ -558,17 +567,18 @@ sequenced on, not a routed path.
   without it — so removing a far-flung stop can tighten what's left. An
   "Add back" list restores them. `excluded` filters the orders handed to
   `planLoads`; the road matrix key stays keyed on the full selection so
-  toggling a drop never re-bills Google.
+  toggling a drop never re-bills the router.
 
 - **Roads when routing is configured, straight lines otherwise.** With
-  `ROUTING_API_KEY` set, sequencing, `routeMeters` and `routeSeconds` run on
-  the Google Routes matrix (ferries included); clustering stays great-circle
+  `HERE_API_KEY` set, sequencing, `routeMeters` and `routeSeconds` run on
+  the HERE truck matrix (ferries included); clustering stays great-circle
   because a cluster centroid is not a real place to route from. Without a key,
   every distance is great-circle — no roads, no drive times, no ferries, two
   drops either side of an estuary look adjacent and are an hour apart. Either
-  way it is a **proposal a dispatcher reviews** (road routing is still a *car*,
-  not a 4.6 m trailer), and the dialog says so where it would be easiest to
-  forget.
+  way it is a **proposal a dispatcher reviews**: the matrix routes a truck, but
+  a *generic* one — `DEFAULT_FLEET_VEHICLE`, because grouping happens before
+  any vehicle is assigned — so a specific trailer's height is not what was
+  planned against. The dialog says so where it would be easiest to forget.
 - **Customs splits before geography.** A cluster straddling a customs boundary
   cannot be cut in half afterwards without leaving both halves badly shaped, so
   regimes are separated first. Mixing a GB export with a domestic drop puts two
@@ -585,20 +595,40 @@ sequenced on, not a routed path.
 
 ## Geocoding
 
-`lib/geocoding/google.ts`, server-only, `GEOCODING_API_KEY`. Separate key from
-the basemap — this one must stay private and must have **no HTTP referrer
-restriction** (a server-side call sends no referrer).
+`lib/geocoding/here.ts`, server-only, `HERE_API_KEY` (the same key the router
+uses — they are separate services on it, and Test connections checks each).
+Separate key from the basemap: this one must stay private and must have **no
+domain restriction**, because a server-side call sends no Referer or Origin.
 
-**Precision is the whole game.** Google answers "Ballymount, Dublin" with the
-centre of Ballymount and calls it success. Stored, that coordinate clusters
+**Precision is the whole game.** A geocoder answers "Ballymount, Dublin" with
+the centre of Ballymount and calls it success. Stored, that coordinate clusters
 convincingly and sits inside a 5 km geofence, so the proximity alert fires
 while the driver is streets away from a customer who was just told they were
-close. A wrong coordinate is worse than none, because none is visible. So
-`APPROXIMATE` results are **refused** and sent to the manual Fix address path;
-`ROOFTOP`, `RANGE_INTERPOLATED` and `GEOMETRIC_CENTER` are accepted. The
-country is checked twice — component filter plus bounding box — and Google's
+close. A wrong coordinate is worse than none, because none is visible.
+
+HERE grades precision across two fields, and `gradeResult()` collapses them
+into our own `GeocodePrecision` so nothing downstream carries a provider's
+vocabulary:
+
+| HERE result | Grade | Verdict |
+| --- | --- | --- |
+| `houseNumber` + `houseNumberType` `PA`/`MPA` | `rooftop` | accepted |
+| `houseNumber` + `interpolated` | `interpolated` | accepted |
+| `street` | `street` | accepted |
+| `postalCodePoint` | `postal_point` | accepted **for IE only** |
+| `locality`, `administrativeArea`, `addressBlock`, `place`, `intersection` | `area` | **refused** → Fix address |
+
+The Ireland-only exception is the Eircode rule: an Eircode is a single
+building, a UK outward code is a district covering thousands of homes. Same
+result type, different meaning, so the country decides. The country itself is
+checked twice — the `in=countryCode:` filter plus a bounding box — and HERE's
 normalised address is shown back, because a match on the wrong Station Road is
 only catchable by reading it.
+
+`in=countryCode:` wants ISO alpha-3, so `alpha3ForCountry()` in `regions.ts` is
+the inverse of the existing `ALPHA3_TO_CODE`. It is a separate table, not an
+inversion, because **`XI` maps to `GBR`**: Northern Ireland is a customs
+territory and not a geocoding one.
 
 **Eircode first, for Ireland.** An Eircode is a single building, not a district
 like a UK outward code. When an Irish order carries a well-formed one,
@@ -693,34 +723,50 @@ comes from `loads`. The UI shows duty and GPS signal as two separate badges;
 don't collapse them, because a truck can be booked solid *and* have a dead
 tracker — `trk-06` in the fixtures is deliberately both.
 
-## Routing & ETA — Google Routes API
+## Routing & ETA — HERE Routing v8
 
-`lib/routing/google.ts`, server-only, `ROUTING_API_KEY` (falls back to
-`GEOCODING_API_KEY` — same Google Cloud project). Two calls: `routeMatrix()`
-(traffic-unaware, 625-element tiles) feeds the auto-planner; `routeLeg()`
-(traffic-aware) is the live truck → next-stop ETA. **Both degrade to
-`haversineMeters` on any failure** — no key, spent quota or a network blip
-must never break auto-plan or the load board, it just drops to straight-line
-maths with the UI saying so.
+`lib/routing/here.ts`, server-only, `HERE_API_KEY`. Two calls: `routeMatrix()`
+(traffic-unaware, `matrix.router.hereapi.com/v8/matrix`) feeds the auto-planner;
+`routeLeg()` (traffic-aware, `router.hereapi.com/v8/routes`) is the live truck →
+next-stop ETA. **Both degrade to `haversineMeters` on any failure** — no key,
+spent quota or a network blip must never break auto-plan or the load board, it
+just drops to straight-line maths with the UI saying so.
 
-- **The two endpoints want different point shapes** and it is silent when
-  wrong. `computeRoutes` (`routeLeg`) takes a bare `Waypoint` for
-  `origin`/`destination` (`waypoint(p)` → `{ location: { latLng } }`);
-  `computeRouteMatrix` (`routeMatrix`) wraps it — `matrixPoint(p)` →
-  `{ waypoint: { location: { latLng } } }`. Sending the wrapped form to
-  `computeRoutes` is a **400**, which the degrade path swallows into
-  straight-line ETAs — so a broken `routeLeg` looks like "routing just isn't
-  configured". A 400 here is a malformed body, **not** a key/enablement
-  problem (that is a 403 → `denied`).
-
-- **`travelMode: "DRIVE"` is a car.** Google Routes has no HGV profile, so it
-  ignores the 4.0 m bridge, the weight limit and ADR. `truckRoutingWarning()`
-  still applies at every navigation handoff. A routed number beats a straight
-  line and is not a truck-legal route.
+- **`transportMode=truck`, and that is the point of being here.** Google Routes
+  had no HGV profile, so every routed figure in the app used to be a car's.
+  HERE takes gross weight, height, length and ADR class and avoids the 4.0 m
+  bridge and the weight limit. `lib/routing/vehicle.ts` is the only place that
+  conversion lives — note **height and length are centimetres**, which is
+  silent when wrong: a 4.62 m trailer sent as `4.62` is a vehicle 5 cm tall and
+  fits under everything.
+- **The live ETA knows the truck; the planner does not.** `attachRoutedEtas()`
+  has the `Truck` row on the `LoadView` and passes its real dimensions.
+  `roadLegsForGroups()` runs before any vehicle is assigned — the planner picks
+  trucks longest-run-first, afterwards — so it routes on
+  `DEFAULT_FLEET_VEHICLE`, a 44 t artic at 4.65 m. The auto-plan dialog says
+  so; do not let that line drift back to claiming a per-vehicle route.
+- **This does not make the driver's navigation truck-legal.**
+  `truckRoutingWarning()` still applies at every handoff, because Waze, Google
+  Maps and Apple Maps all route cars whatever the planner used.
+- **Sum the sections, never read `sections[0]`.** HERE splits a route at every
+  change of transport, so a Dublin–Holyhead sailing comes back as drive /
+  ferry / drive. Taking the first section returns the run to the port and calls
+  it the journey. Ferries stay allowed — they are part of a real answer for
+  this fleet.
+- **The matrix has two shapes and the span picks one.** Within ~360 km the
+  request is region-bounded (`autoCircle`) and carries the truck dimensions.
+  The cap is HERE's 400 km region diameter minus the `autoCircle` margin, which
+  is added to the *radius* on both sides — checking the raw 400 km against the
+  span is how a 390 km group ends up asking for a 410 km region.
+  Wider than that, HERE requires `regionDefinition: {type: "world"}`, which in
+  turn requires a predefined `profile` (`truckFast`) — free-flow speeds, no
+  custom vehicle. `fitsBoundedRegion()` measures first so a rejected request is
+  not a wasted round trip. Google's 625-element tiling loop is gone; one
+  synchronous call covers any group the planner builds.
 - **The planner stays pure.** `planLoads()` takes an optional
   `geometry.leg(from, to)` accessor; `roadMatrixForOrders()` (a server action)
   resolves the matrix once and the dialog hands it in as a plain lookup, so the
-  radius / max-stops knobs stay instant and never bill Google. Clustering stays
+  radius / max-stops knobs stay instant and never re-bill. Clustering stays
   great-circle — a cluster centroid is not a real place to route from — only
   sequencing, `routeMeters` and `routeSeconds` use roads.
 - **Live ETA is deliberately narrow.** `getLoads({ routedEtas: true })` — only
@@ -733,16 +779,19 @@ maths with the UI saying so.
   dashboard route is dynamic and none has a `loading.tsx`, so Next's default
   `<Link>` prefetch server-renders the *whole* page. Seven nav links meant
   seven full renders per page view, Active Loads and the Live Fleet Map among
-  them — each billing Google for a traffic-aware route with nobody watching.
-  Production logs showed ~870 renders a day of those two routes against a
-  handful of real visits. Three things hold the line now, and all three are
-  load-bearing:
+  them — each billing a traffic-aware route with nobody watching. Production
+  logs showed ~870 renders a day of those two routes against a handful of real
+  visits. HERE's free tier is 30,000 transactions a month, so this still
+  matters. Three things hold the line, and all three are load-bearing:
   1. the nav rail sets **`prefetch={false}`** (`app-shell.tsx`);
   2. `isPrefetchRequest()` (`lib/prefetch.ts`) makes a prefetch that slips
      through fall back to straight-line ETAs — the backstop for any `<Link>`
      added later;
   3. the routed-ETA cache lives in **`routed_eta_cache`** (0020), shared by
      every instance, with the in-process `Map` demoted to an L1 in front of it.
+     Its `(truck_id, load_item_id)` key also keeps it correct now that a leg is
+     vehicle-specific — a leg routed for one truck can never be served to
+     another.
   Before adding a `<Link>` to Active Loads or the Live Fleet Map, or a
   `loading.tsx` that would make prefetch cheap again, know that this is what
   you are touching.
@@ -755,7 +804,7 @@ maths with the UI saying so.
 
 ## Order geocoding — Eircode first
 
-`geocodeAddress()` in `lib/geocoding/google.ts`. For an Irish order carrying a
+`geocodeAddress()` in `lib/geocoding/here.ts`. For an Irish order carrying a
 well-formed Eircode it queries the **Eircode alone** before the address string
 — an Eircode is a single building, not a district, so it turns a hopeless rural
 address into a rooftop match. Falls through to the address-string query if the
@@ -770,10 +819,10 @@ the `D6W` routing key (Dublin 6 West — a letter in the third position).
 ## Geocode cache
 
 `lib/geocoding/cache.ts` + migration 0012. Resolved delivery locations are
-saved and reused, so a re-imported address costs no Google lookup and a
+saved and reused, so a re-imported address costs no provider lookup and a
 hand-placed rural address is never hand-placed twice. Fills three paths:
 `importOrders` (before an order queues for geocoding), `geocodeOrders` (in
-front of Google), and `fixOrderAddress` (writes a `manual` entry).
+front of HERE), and `fixOrderAddress` (writes a `manual` entry).
 
 - **The key is tight, because a cache hit is invisible.** Eircode for Ireland,
   `country:postcode:normalised-address` elsewhere, and **nothing without one of
@@ -785,14 +834,14 @@ front of Google), and `fixOrderAddress` (writes a `manual` entry).
   `geometric_center` is weak — `geocodeOrders` still tries a fresh geocode and
   only falls back to the cached point if that fails.
 - **Never silent.** Every reuse shows "from a saved location / manual fix" on
-  the row, the same principle as showing Google's normalised address back.
+  the row, the same principle as showing HERE's normalised address back.
 - **Retention.** It is customer personal data keyed by address — same posture
   as `orders` / `notifications`. `last_used_at` (indexed, non-manual only) is
   there for a staleness sweep; `manual` entries are real human knowledge and
   are kept until the address itself is corrected.
 - **Not built:** an admin screen to inspect or prune it, and the staleness
   sweep itself. `geocodeOrders` still hard-returns `not_configured` when
-  `GEOCODING_API_KEY` is unset, so cache-only geocoding from the UI does not
+  `HERE_API_KEY` is unset, so cache-only geocoding from the UI does not
   work yet (the import path already runs cache-only).
 
 ## Known gaps

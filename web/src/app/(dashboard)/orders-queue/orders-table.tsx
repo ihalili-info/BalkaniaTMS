@@ -48,9 +48,9 @@ export function OrdersTable({
   orders: Order[];
   trucks: Truck[];
   loadRefByOrderId: Record<string, string>;
-  /** GEOCODING_API_KEY present — Auto-plan says so rather than failing late. */
+  /** HERE_API_KEY present — Auto-plan says so rather than failing late. */
   geocodingReady: boolean;
-  /** Google Maps browser key, for Auto-plan's map view. */
+  /** HERE Maps browser key, for Auto-plan's map view. */
   mapsKey?: string | null;
   /** Ids added by CSV import this session — marked so they are traceable. */
   importedIds?: Set<string>;

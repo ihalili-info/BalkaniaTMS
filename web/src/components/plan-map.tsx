@@ -20,7 +20,7 @@ import type { LatLng } from "@/lib/types";
 export interface GroupColour {
   /** CSS custom-property name, for SVG. */
   token: string;
-  /** Resolved hex, for Google Maps overlays (which take strings, not vars). */
+  /** Resolved hex, for map overlays (which take colour strings, not CSS vars). */
   hex: string;
 }
 

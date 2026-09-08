@@ -21,9 +21,9 @@ export function DispatchActions({
   trucks: Truck[];
   drivers: Driver[];
   unassignedOrders: Order[];
-  /** GEOCODING_API_KEY present — Auto-plan says so rather than failing late. */
+  /** HERE_API_KEY present — Auto-plan says so rather than failing late. */
   geocodingReady: boolean;
-  /** Google Maps browser key, for Auto-plan's map view. */
+  /** HERE Maps browser key, for Auto-plan's map view. */
   mapsKey?: string | null;
 }) {
   const [planning, setPlanning] = useState(false);

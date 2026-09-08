@@ -186,6 +186,34 @@ export function countryFromAlpha3(
   return ALPHA3_TO_CODE[alpha3.trim().toUpperCase()] ?? null;
 }
 
+/**
+ * Our alpha-2 code → ISO 3166-1 alpha-3, the direction the HERE geocoder wants
+ * (`in=countryCode:IRL`).
+ *
+ * Not derived by inverting `ALPHA3_TO_CODE`, because the mapping is not a
+ * bijection: **`XI` is `GBR` here**. Northern Ireland is a distinct customs
+ * territory — that is what `customsRegime()` exists for — but it is not a
+ * distinct country to a geocoder, and asking for `countryCode:XI` would return
+ * nothing at all. Keeping the two tables separate makes that deliberate rather
+ * than an accident of inversion.
+ */
+const CODE_TO_ALPHA3: Record<string, string> = {
+  IE: "IRL",
+  XI: "GBR",
+  GB: "GBR",
+  FR: "FRA",
+  NL: "NLD",
+  DE: "DEU",
+  BE: "BEL",
+};
+
+export function alpha3ForCountry(
+  code: CountryCode | null | undefined,
+): string | null {
+  if (!code) return null;
+  return CODE_TO_ALPHA3[code.trim().toUpperCase()] ?? null;
+}
+
 /* --- postcodes ------------------------------------------------------------- */
 
 /**

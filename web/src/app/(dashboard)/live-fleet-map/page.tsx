@@ -9,7 +9,7 @@ import {
   getTrucks,
   stopsInGeofence,
 } from "@/lib/data/fleet";
-import { MAPS_KEY_VARS, googleMapsKey } from "@/lib/maps.server";
+import { MAPS_KEY_VARS, hereMapsKey } from "@/lib/maps.server";
 import { isPrefetchRequest } from "@/lib/prefetch";
 import { SyncGpsButton } from "@/components/sync-gps";
 
@@ -19,7 +19,7 @@ import { RealtimeStatus } from "./realtime-status";
 export const metadata: Metadata = { title: "Live Fleet Map" };
 
 export default async function LiveFleetMapPage() {
-  // A prefetch has no viewer, so it does not get a billed Google route — see
+  // A prefetch has no viewer, so it does not get a billed routing call — see
   // `isPrefetchRequest`. The stops then carry `eta_source: "straight_line"`,
   // which the UI already labels honestly.
   const routedEtas = !(await isPrefetchRequest());
@@ -32,7 +32,7 @@ export default async function LiveFleetMapPage() {
   const offline = trucks.length - reporting.length;
   const activeLoads = activeOf(loads);
   const inGeofence = stopsInGeofence(loads);
-  const mapsKey = googleMapsKey();
+  const mapsKey = hereMapsKey();
 
   // Demand that has not yet been put on a load — the CRM's "where we need to
   // go next", not the truck's own next stop. Only the geocoded ones can be
@@ -95,7 +95,7 @@ export default async function LiveFleetMapPage() {
         loads={loads}
         pendingOrders={pendingOrders}
         now={new Date()}
-        googleMapsKey={mapsKey}
+        hereMapsKey={mapsKey}
       />
 
       <RealtimeStatus />
@@ -133,13 +133,16 @@ export default async function LiveFleetMapPage() {
               ))}
             </ul>
             <p>
-              Set either to a Google browser key with the{" "}
-              <em>Maps JavaScript API</em> enabled, and the map switches over.
-              The <span className="font-mono text-data-sm">NEXT_PUBLIC_</span>{" "}
-              one is compiled in, so it needs a redeploy to take effect; the
-              other is read per request. Either way the key is visible in page
-              source, so restrict it by HTTP referrer and keep it separate from{" "}
-              <span className="font-mono text-data-sm">GEOCODING_API_KEY</span>.
+              Set either to a HERE browser key with the{" "}
+              <em>Maps API for JavaScript</em> enabled, and the map switches
+              over. The{" "}
+              <span className="font-mono text-data-sm">NEXT_PUBLIC_</span> one
+              is compiled in, so it needs a redeploy to take effect; the other
+              is read per request. Either way the key is visible in page source,
+              so restrict it to this app&rsquo;s domains and keep it separate
+              from <span className="font-mono text-data-sm">HERE_API_KEY</span>,
+              which stays server-side and authorises billable geocoding and
+              routing.
             </p>
           </div>
         </div>

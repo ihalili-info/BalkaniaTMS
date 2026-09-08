@@ -48,7 +48,7 @@ function AddressForm({
   onClose,
 }: {
   order: Order;
-  /** GEOCODING_API_KEY is set — offer a one-click lookup instead of a manual pin. */
+  /** HERE_API_KEY is set — offer a one-click lookup instead of a manual pin. */
   geocodingReady: boolean;
   onSave: (orderId: string, patch: AddressPatch) => void;
   onClose: () => void;

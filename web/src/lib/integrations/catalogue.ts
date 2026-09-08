@@ -258,8 +258,10 @@ export const CONNECTORS: Connector[] = [
     purpose: "Turns street addresses into GEOGRAPHY(POINT, 4326).",
     icon: "location_on",
     status: "not_configured",
-    envVars: ["GEOCODING_API_KEY"],
-    secrets: ["GEOCODING_API_KEY"],
+    envVars: ["HERE_API_KEY"],
+    secrets: ["HERE_API_KEY"],
+    endpoint: "GET geocode.search.hereapi.com/v1/geocode",
+    note: "Matches coarser than a street are refused, not stored — a town-centre point sits inside the 5 km geofence and would fire the customer alert while the driver is streets away. Refused addresses go to the manual Fix address path. For Irish orders a well-formed Eircode is queried on its own first: an Eircode is a single building, unlike a UK outward code, which is what resolves rural townland addresses.",
     fields: [
       {
         key: "provider",
@@ -267,8 +269,7 @@ export const CONNECTORS: Connector[] = [
         kind: "select",
         options: [
           { value: "none", label: "None — manual coordinates only" },
-          { value: "google", label: "Google Geocoding" },
-          { value: "mapbox", label: "Mapbox" },
+          { value: "here", label: "HERE Geocoding & Search" },
         ],
         help: "With none set, addresses are placed by hand from the Orders Queue.",
       },
@@ -281,10 +282,10 @@ export const CONNECTORS: Connector[] = [
       "Road distance and drive time for auto-plan sequencing and live truck ETAs. Falls back to straight-line maths when absent.",
     icon: "route",
     status: "not_configured",
-    envVars: ["ROUTING_API_KEY"],
-    secrets: ["ROUTING_API_KEY"],
-    endpoint: "POST routes.googleapis.com (computeRoutes / computeRouteMatrix)",
-    note: "Car routing — Google Routes has no HGV profile, so it ignores height, weight and ADR limits. A routed number beats a straight line and is still not a truck-legal route. ROUTING_API_KEY may hold the same value as GEOCODING_API_KEY (one Google Cloud project); the code falls back to that key if this one is unset, but the card only reads green once ROUTING_API_KEY is set explicitly.",
+    envVars: ["HERE_API_KEY"],
+    secrets: ["HERE_API_KEY"],
+    endpoint: "router.hereapi.com/v8/routes · matrix.router.hereapi.com/v8/matrix",
+    note: "HGV routing: transportMode=truck, with the vehicle's gross weight, height, length and ADR class, so a route respects the 4.0 m bridge and the weight limit. The live ETA uses the actual truck; auto-plan runs before a truck is assigned and uses a fleet default. This does NOT extend to the driver's phone — Waze, Google Maps and Apple Maps all route cars, which is why the warning still appears at every navigation handoff. Same key as Geocoding, but they are separate services on it: Test connections checks each one.",
     fields: [
       {
         key: "provider",
@@ -292,7 +293,7 @@ export const CONNECTORS: Connector[] = [
         kind: "select",
         options: [
           { value: "none", label: "None — straight-line distance only" },
-          { value: "google", label: "Google Routes API" },
+          { value: "here", label: "HERE Routing & Matrix Routing" },
         ],
         help: "With none set, auto-plan and ETAs use great-circle distance at a flat 45 km/h.",
       },

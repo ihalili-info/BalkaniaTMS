@@ -10,7 +10,7 @@ import {
   lookupGeocodeCache,
   saveGeocodeCache,
 } from "@/lib/geocoding/cache";
-import { geocodeAddress, geocodingConfigured } from "@/lib/geocoding/google";
+import { geocodeAddress, geocodingConfigured } from "@/lib/geocoding/here";
 import {
   firstError,
   readCrmBody,
@@ -38,7 +38,7 @@ import type { LatLng } from "@/lib/types";
  *                                        under a driver)
  *   - `"cancelled": true`           → the pending order is removed; refused once
  *                                     it is on a load or delivered
- *   - address resolves (supplied coords, geocode cache, or Google when
+ *   - address resolves (supplied coords, geocode cache, or the geocoder when
  *     configured) → coordinates stored; otherwise the order queues for the
  *     dispatcher's Geocode action, exactly as a failed CSV import row does.
  */
@@ -47,7 +47,7 @@ import type { LatLng } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 /**
- * How many *fresh* Google geocodes one request will run. The cache and any
+ * How many *fresh* geocodes one request will run. The cache and any
  * supplied coordinates are free and uncapped; only live lookups count. A large
  * CRM backfill would otherwise blow the ack budget — the rest simply queue.
  */

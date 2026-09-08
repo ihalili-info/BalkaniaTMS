@@ -17,7 +17,12 @@ import {
   ROUTING_MESSAGE,
   routingConfigured,
   verifyRoutingConnection,
-} from "@/lib/routing/google";
+} from "@/lib/routing/here";
+import {
+  GEOCODE_MESSAGE,
+  geocodingConfigured,
+  verifyGeocodingConnection,
+} from "@/lib/geocoding/here";
 
 import { connector } from "./catalogue";
 import type { ConfigValue } from "./store";
@@ -159,6 +164,28 @@ export async function testConnections(): Promise<ConnectionTestResult[]> {
     });
   }
 
+  // Geocoding and routing share HERE_API_KEY but are separate services on it,
+  // and a key can easily be enabled for one and not the other. Checking them
+  // separately is the only way that shows up as anything but "it works".
+  if (!geocodingConfigured()) {
+    results.push({
+      id: "geocoding",
+      name: "Geocoding",
+      ok: false,
+      message: GEOCODE_MESSAGE.not_configured,
+    });
+  } else {
+    const check = await verifyGeocodingConnection();
+    results.push({
+      id: "geocoding",
+      name: "Geocoding",
+      ok: check.ok,
+      message: check.ok
+        ? "HERE Geocoding & Search reachable and the key is enabled for it."
+        : (check.failure ? GEOCODE_MESSAGE[check.failure] : "Request failed."),
+    });
+  }
+
   if (!routingConfigured()) {
     results.push({
       id: "routing",
@@ -173,7 +200,7 @@ export async function testConnections(): Promise<ConnectionTestResult[]> {
       name: "Routing & ETA",
       ok: check.ok,
       message: check.ok
-        ? "Google Routes reachable and the key is enabled for it."
+        ? "HERE Routing reachable and the key is enabled for it."
         : (check.failure ? ROUTING_MESSAGE[check.failure] : "Request failed."),
     });
   }

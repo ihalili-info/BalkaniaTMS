@@ -30,9 +30,9 @@ export function OrdersWorkspace({
   /** Needed by Auto-plan, which suggests a truck per group. */
   trucks: Truck[];
   loadRefByOrderId: Record<string, string>;
-  /** Whether GEOCODING_API_KEY is set, so the UI can say so rather than fail. */
+  /** Whether HERE_API_KEY is set, so the UI can say so rather than fail. */
   geocodingReady: boolean;
-  /** Google Maps browser key, for Auto-plan's map view. */
+  /** HERE Maps browser key, for Auto-plan's map view. */
   mapsKey: string | null;
 }) {
   // One clock for the render, so relative times inside it agree.
