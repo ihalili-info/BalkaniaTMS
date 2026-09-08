@@ -161,12 +161,22 @@ export async function routeLeg(
     origin: coord(from),
     destination: coord(to),
     return: "summary",
-    // `any` is HERE's explicit "ignore time and traffic". Omitting the
-    // parameter entirely would make the request traffic-aware by default, so
-    // the traffic-unaware path has to say so.
-    departureTime: trafficAware ? new Date().toISOString() : "any",
     apiKey: key,
   });
+
+  // `any` is HERE's explicit "ignore time and traffic". Omitting the parameter
+  // entirely means "now", which is exactly what a live ETA wants.
+  //
+  // **The traffic-aware case deliberately sends no timestamp.** The Google
+  // implementation this replaced sent `new Date().toISOString()`, and
+  // production logged 1,801 rejections of it in eight days —
+  // `400 Timestamp must be set to a future time` — because by the time the
+  // request was processed, the clock value we generated was already in the
+  // past. Every one of those silently degraded to a straight-line ETA, which
+  // is the failure mode that looks like "routing just isn't configured". The
+  // same deployment also logs `JWT issued at future` against Supabase, so
+  // there is real clock skew here. Not sending a timestamp cannot be skewed.
+  if (!trafficAware) params.set("departureTime", "any");
   // Ferries are part of a real answer for this fleet (Dublin–Holyhead), so
   // nothing is added to `avoid[features]`.
   appendVehicleParams(params, vehicle);
