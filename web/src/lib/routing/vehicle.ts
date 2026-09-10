@@ -144,3 +144,24 @@ export function appendVehicleParams(
     );
   }
 }
+
+/**
+ * A stable identity for the vehicle a routed leg was computed for.
+ *
+ * Used as part of the `route_leg_cache` key (migration 0021). A cached leg is
+ * only reusable for a vehicle that would have been routed the same way, and
+ * the dimensions are exactly what decides that — a 4.65 m trailer and a 4.00 m
+ * one get different answers at the same bridge.
+ *
+ * Sorted hazard classes, because `hazardousGoodsFor()` builds them from a Set
+ * and two identical trucks must not key differently on iteration order.
+ */
+export function vehicleProfileKey(vehicle: HereVehicle): string {
+  const hazards = [...(vehicle.shippedHazardousGoods ?? [])].sort().join("+");
+  return [
+    vehicle.grossWeight ?? "-",
+    vehicle.height ?? "-",
+    vehicle.length ?? "-",
+    hazards === "" ? "-" : hazards,
+  ].join(":");
+}

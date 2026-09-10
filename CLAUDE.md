@@ -89,6 +89,16 @@ keep it and `supabase/migrations/` in sync.
     `ROUTED_ETA_TTL_MS`. Exists because the previous throttle was a `Map` in
     one serverless instance's memory, which on Vercel is close to no throttle
     at all — see "Routing & ETA" below.
+  - `0021_route_leg_cache.sql` — `route_leg_cache`: the *other* half of the
+    same mistake. The auto-planner's matrix legs were held only in a
+    module-level object in one browser tab, so a refresh re-bought the lot and
+    opening the dialog on a 60-order selection cost ~650 matrix elements.
+    Keyed `(from_key, to_key, profile)` on `coordKey()` strings.
+    **No TTL** — unlike `routed_eta_cache`, these are traffic-unaware
+    free-flow figures between fixed coordinates, a property of the road
+    network rather than of the moment. `profile` is load-bearing: a bounded
+    request carries real vehicle dimensions and a `world` one does not, so the
+    two must never be interchanged.
 - `web/` — Next.js 16 (App Router, TypeScript, Tailwind v4) admin panel. See
   [web/README.md](web/README.md) for its layout and conventions.
   - `src/app/globals.css` — the entire design system as Tailwind v4 `@theme` tokens
@@ -119,7 +129,12 @@ keep it and `supabase/migrations/` in sync.
     `transportMode=truck`, live-traffic single leg); falls back to great-circle
     on any failure
   - `src/lib/routing/vehicle.ts` — a `Truck` as HERE vehicle params (pure);
-    also `DEFAULT_FLEET_VEHICLE`, used when no truck is assigned yet
+    also `DEFAULT_FLEET_VEHICLE`, used when no truck is assigned yet, and
+    `vehicleProfileKey()` for the leg cache
+  - `src/lib/routing/leg-cache.ts` — read/write for `route_leg_cache` (0021),
+    the shared store of the auto-planner's matrix legs. Best-effort in both
+    directions: a miss costs a HERE call, a failed write costs the next plan
+    one
   - `src/lib/integrations/` — connector catalogue, config store, messaging policy
   - `src/lib/types.ts` — row types mirroring the migration
   - `src/lib/supabase/` — `client.ts` (browser), `server.ts` (RSC/route handlers, cookie-based), `service.ts` (service-role, server-only, bypasses RLS — for webhooks/cron)
@@ -764,11 +779,30 @@ just drops to straight-line maths with the UI saying so.
   not a wasted round trip. Google's 625-element tiling loop is gone; one
   synchronous call covers any group the planner builds.
 - **The planner stays pure.** `planLoads()` takes an optional
-  `geometry.leg(from, to)` accessor; `roadMatrixForOrders()` (a server action)
+  `geometry.leg(from, to)` accessor; `roadLegsForGroups()` (a server action)
   resolves the matrix once and the dialog hands it in as a plain lookup, so the
   radius / max-stops knobs stay instant and never re-bill. Clustering stays
   great-circle — a cluster centroid is not a real place to route from — only
   sequencing, `routeMeters` and `routeSeconds` use roads.
+- **The auto-planner's matrix spend has three gates, and they compound.**
+  A group of eight drops plus the depot is 81 elements; a 60-order selection is
+  about eight such groups, so the dialog once spent ~650 elements the moment it
+  opened, and again after every refresh. In order:
+  1. **`route_leg_cache` (0021)** — legs are read before anything is bought,
+     shared across instances, sessions and dispatchers. Re-planning orders
+     planned before spends nothing. The browser's `legCache` is now an L1 in
+     front of it, not the cache itself.
+  2. **`missingRequests()` in `mutations.ts`** — HERE's matrix only takes
+     rectangles, so a group with one new drop is bought as a row plus a column
+     (17 elements), not a fresh square (81). It falls back to the whole square
+     whenever the decomposition would cost more, and a fully cached group
+     issues no request at all.
+  3. **A 1.5 s debounce** on the dialog's buy effect, long enough to sit
+     through a drag of the radius slider. A novel intermediate grouping is
+     still a real HERE call however good the cache is.
+  The old gate keyed on the group's *order set* while the legs keyed on
+  *coordinates*, so excluding a single drop re-bought two whole squares. Don't
+  reintroduce that asymmetry.
 - **Live ETA is deliberately narrow.** `getLoads({ routedEtas: true })` — only
   Active Loads and the Live Fleet Map pass it, because the dashboard layout
   also calls `getLoads()` on every navigation — routes **only the next

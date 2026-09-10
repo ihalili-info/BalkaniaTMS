@@ -48,6 +48,8 @@ src/
     geocoding/here.ts       HERE Geocoding & Search — Eircode-first, refuses coarse
     routing/here.ts         HERE Routing v8 — truck matrix + live traffic leg
     routing/vehicle.ts      a Truck as HERE vehicle params (pure)
+    routing/leg-cache.ts    route_leg_cache reads/writes — the auto-planner's
+                            matrix legs, shared across sessions
     maps.ts                 HERE Maps JS loader (CDN, ordered) + design tokens
     integrations/           connector catalogue, config store, messaging policy
     supabase/               client / server / service-role helpers

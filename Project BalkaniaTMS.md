@@ -215,6 +215,31 @@ CREATE TABLE routed_eta_cache (
   PRIMARY KEY (truck_id, load_item_id)
 );
 
+-- Cache of traffic-UNaware HERE matrix legs, the ones the auto-planner buys.
+-- Shared across serverless instances, sessions and dispatchers — before it the
+-- only thing holding a bought leg was a module-level object in one browser tab,
+-- so a refresh re-bought the lot and simply opening the auto-plan dialog on a
+-- 60-order selection cost ~650 matrix elements. No TTL, unlike routed_eta_cache:
+-- these legs are free-flow road figures between two fixed coordinates, a
+-- property of the road network rather than of the moment. Correcting an address
+-- moves the coordinate and therefore the key. Safe to truncate.
+CREATE TABLE route_leg_cache (
+  -- coordKey(): "lat,lng" at five decimals, about a metre.
+  from_key TEXT NOT NULL,
+  to_key TEXT NOT NULL,
+  -- matrixProfileKey(): which routing shape produced this. A region-bounded
+  -- request carries the real vehicle dimensions; a `world` request is pinned to
+  -- the generic truckFast profile and ignores them. The two disagree at a height
+  -- or weight restriction, so one must never be served as the other.
+  profile TEXT NOT NULL,
+  distance_m DOUBLE PRECISION NOT NULL,
+  duration_s INTEGER NOT NULL,
+  computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  -- A->B and B->A are separate rows: one-way systems are not symmetric, and
+  -- nearest-neighbour sequencing reads both directions.
+  PRIMARY KEY (from_key, to_key, profile)
+);
+
 -- Spatial indexes for efficient proximity queries
 CREATE INDEX idx_trucks_location ON trucks USING GIST (current_location);
 CREATE INDEX idx_trucks_features ON trucks USING GIN (features);
@@ -222,6 +247,7 @@ CREATE INDEX idx_trucks_assignable ON trucks (id) WHERE availability = 'availabl
 CREATE INDEX idx_orders_location ON orders USING GIST (delivery_location);
 CREATE INDEX idx_geocode_cache_last_used ON geocode_cache (last_used_at) WHERE source <> 'manual';
 CREATE INDEX idx_routed_eta_cache_computed_at ON routed_eta_cache (computed_at);
+CREATE INDEX idx_route_leg_cache_computed_at ON route_leg_cache (computed_at);
 ```
 
 ### Truck ownership split

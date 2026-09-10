@@ -37,6 +37,7 @@ import { haversineMeters } from "@/lib/format";
 import {
   DEFAULT_FLEET_VEHICLE,
   appendVehicleParams,
+  vehicleProfileKey,
   type HereVehicle,
 } from "@/lib/routing/vehicle";
 import type { LatLng, RouteLeg } from "@/lib/types";
@@ -239,6 +240,33 @@ interface MatrixResponse {
 }
 
 /**
+ * Which of the two matrix shapes produced a leg.
+ *
+ * `bounded` carried the caller's real vehicle dimensions; `world` was pinned to
+ * the generic `truckFast` profile because the points were too far apart for a
+ * region-bounded request. The two give different answers at a height or weight
+ * restriction, so anything that stores a leg must store this alongside it.
+ */
+export type MatrixRegion = "bounded" | "world";
+
+/**
+ * The cache identity of a routed leg: the vehicle, and the shape that routed
+ * it. Keyed into `route_leg_cache` (migration 0021).
+ *
+ * A `world` request ignores the vehicle entirely, so it collapses to one key
+ * whatever truck was asked for — recording the dimensions there would imply a
+ * precision the answer does not have.
+ */
+export function matrixProfileKey(
+  vehicle: HereVehicle,
+  region: MatrixRegion,
+): string {
+  return region === "world"
+    ? `world:${WORLD_TRUCK_PROFILE}`
+    : `bounded:${vehicleProfileKey(vehicle)}`;
+}
+
+/**
  * The tightest region that covers every point, or null if they are too spread
  * out for a bounded request.
  *
@@ -257,6 +285,17 @@ function fitsBoundedRegion(points: LatLng[]): boolean {
     }
   }
   return true;
+}
+
+/**
+ * Which shape a matrix over these points will take.
+ *
+ * Exported because a caller that caches legs has to know the profile *before*
+ * it looks anything up, and the answer is a pure function of the geometry.
+ * `routeMatrix` calls this too, so the two can never disagree.
+ */
+export function matrixRegionFor(points: LatLng[]): MatrixRegion {
+  return fitsBoundedRegion(points) ? "bounded" : "world";
 }
 
 /**
@@ -280,22 +319,47 @@ function fitsBoundedRegion(points: LatLng[]): boolean {
 export async function routeMatrix(
   origins: LatLng[],
   destinations: LatLng[],
-  { vehicle = DEFAULT_FLEET_VEHICLE }: { vehicle?: HereVehicle } = {},
+  {
+    vehicle = DEFAULT_FLEET_VEHICLE,
+    region: forcedRegion,
+  }: {
+    vehicle?: HereVehicle;
+    /**
+     * Force the shape instead of deriving it from these points.
+     *
+     * For a caller that slices one logical matrix into several requests. A
+     * narrow slice of a wide group fits a bounded region even though the group
+     * does not, so left to itself it would route under different rules than
+     * its siblings — and a cache keyed on the profile would then store the
+     * slice somewhere the group never looks. Pass the whole group's region and
+     * every slice agrees.
+     *
+     * Only ever widen with this. Forcing `bounded` on points HERE considers
+     * too far apart is rejected at the API.
+     */
+    region?: MatrixRegion;
+  } = {},
 ): Promise<{
   matrix: (RouteLeg | null)[][];
   failure: RoutingFailure | null;
+  /**
+   * Which shape HERE was asked for, or null if the request never went out.
+   * Callers that cache a leg must key on this — see `matrixProfileKey`.
+   */
+  region: MatrixRegion | null;
 }> {
   const key = routingKey();
-  if (!key) return { matrix: [], failure: "not_configured" };
+  if (!key) return { matrix: [], failure: "not_configured", region: null };
   if (origins.length === 0 || destinations.length === 0) {
-    return { matrix: origins.map(() => []), failure: null };
+    return { matrix: origins.map(() => []), failure: null, region: null };
   }
 
   const empty: (RouteLeg | null)[][] = origins.map(() =>
     destinations.map(() => null),
   );
 
-  const bounded = fitsBoundedRegion([...origins, ...destinations]);
+  const region =
+    forcedRegion ?? matrixRegionFor([...origins, ...destinations]);
 
   const body: Record<string, unknown> = {
     origins: origins.map((p) => ({ lat: p.lat, lng: p.lng })),
@@ -305,7 +369,7 @@ export async function routeMatrix(
     matrixAttributes: ["distances", "travelTimes"],
   };
 
-  if (bounded) {
+  if (region === "bounded") {
     body.regionDefinition = { type: "autoCircle", margin: REGION_MARGIN_M };
     body.transportMode = "truck";
     // `vehicle`, not `truck`. The `truck` object is deprecated, HERE refuses a
@@ -337,25 +401,29 @@ export async function routeMatrix(
       cache: "no-store",
     });
   } catch {
-    return { matrix: empty, failure: "network" };
+    return { matrix: empty, failure: "network", region };
   }
 
   if (!response.ok) {
-    return { matrix: empty, failure: await classifyHttp("v8/matrix", response) };
+    return {
+      matrix: empty,
+      failure: await classifyHttp("v8/matrix", response),
+      region,
+    };
   }
 
   let payload: MatrixResponse;
   try {
     payload = await response.json();
   } catch {
-    return { matrix: empty, failure: "bad_response" };
+    return { matrix: empty, failure: "bad_response", region };
   }
 
   const distances = payload.matrix?.distances;
   const travelTimes = payload.matrix?.travelTimes;
   const errorCodes = payload.matrix?.errorCodes;
   if (!Array.isArray(distances) || !Array.isArray(travelTimes)) {
-    return { matrix: empty, failure: "bad_response" };
+    return { matrix: empty, failure: "bad_response", region };
   }
 
   // Row-major and flat: entry (i, j) is at `i * numDestinations + j`. HERE
@@ -383,7 +451,7 @@ export async function routeMatrix(
     }
   }
 
-  return { matrix, failure: null };
+  return { matrix, failure: null, region };
 }
 
 /**

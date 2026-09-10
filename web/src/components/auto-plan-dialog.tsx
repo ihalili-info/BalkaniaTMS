@@ -39,17 +39,27 @@ import type { LatLng, Order, RouteLeg, Truck } from "@/lib/types";
 const DEPOT_LATLNG: LatLng = { lat: DEPOT.lat, lng: DEPOT.lng };
 
 /**
- * Road legs bought from HERE, held for the life of the page.
+ * Road legs already fetched, held for the life of the page.
  *
  * Deliberately outside the component: the dialog unmounts when it closes, so
- * per-mount state meant closing and reopening it re-bought every leg. A leg is
+ * per-mount state meant closing and reopening it re-fetched every leg. A leg is
  * safe to keep — `routeMatrix` is traffic-unaware, so the road distance
  * between two fixed points does not drift, and correcting an address moves the
  * coordinate and therefore the key.
+ *
+ * **This is an L1 in front of `route_leg_cache`, not the cache itself.** It
+ * used to be the only thing holding a bought leg, which meant a refresh, a
+ * hard navigation or a second dispatcher started from nothing and re-bought
+ * the lot — the whole reason migration 0021 exists. It stays because skipping
+ * a round trip to the server action is still worth it.
  */
 const legCache: Record<string, RouteLeg> = {};
 
-/** Groups already paid for, so a second look at the same one is free. */
+/**
+ * Groups already asked for, so a second look at the same one does not even
+ * make the request. Missing it is no longer expensive: the server action reads
+ * `route_leg_cache` first and buys only the pairs that are genuinely absent.
+ */
 const boughtGroups = new Set<string>();
 
 const groupKey = (orderIds: string[]) => [...orderIds].sort().join(",");
@@ -165,6 +175,11 @@ export function AutoPlanDialog({
     // step regroups. Buying on every intermediate grouping would cost more
     // than the whole-matrix approach this replaced; only the setting the
     // dispatcher actually settles on gets paid for.
+    //
+    // Long enough to sit through a drag. Half a second fired mid-slide and
+    // billed a grouping nobody was looking at — `route_leg_cache` makes a
+    // repeat cheap but a *novel* intermediate grouping is still a real HERE
+    // call, so the wait has to outlast the hand on the slider.
     const timer = setTimeout(() => {
       startRouting(async () => {
         const result = await roadLegsForGroups(unbought);
@@ -175,7 +190,7 @@ export function AutoPlanDialog({
         setLegs((prev) => ({ ...prev, ...result.legs }));
         setRoutingNote(result.message);
       });
-    }, 500);
+    }, 1500);
 
     return () => clearTimeout(timer);
   }, [freePlan]);

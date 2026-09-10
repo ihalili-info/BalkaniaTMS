@@ -19,9 +19,17 @@ import {
 } from "@/lib/geocoding/cache";
 import {
   ROUTING_MESSAGE,
+  matrixProfileKey,
+  matrixRegionFor,
   routeMatrix,
   routingConfigured,
+  type MatrixRegion,
 } from "@/lib/routing/here";
+import {
+  readLegCache,
+  writeLegCache,
+  type CachedLeg,
+} from "@/lib/routing/leg-cache";
 import { DEFAULT_FLEET_VEHICLE } from "@/lib/routing/vehicle";
 import { coordKey } from "@/lib/format";
 import { DEPOT } from "@/lib/geo/reference";
@@ -1428,21 +1436,31 @@ export interface RoadMatrixResult {
 }
 
 /**
- * Buys road legs for the auto-planner, one small matrix per proposed group.
+ * Buys road legs for the auto-planner — cache first, and only the pairs that
+ * are actually missing.
  *
- * **Only the pairs the planner actually reads.** `cluster()` groups on
- * great-circle distance against a moving centroid, so the grouping needs no
- * road data at all; `sequence()` and `routeStats()` then read depot→stop and
- * stop→stop pairs *within a group*. A cross-group pair — a Cork drop against a
- * Belfast one — is never looked at. Asking for the full N×N matrix therefore
- * billed roughly six elements for every one consumed, which is what put €174 of
- * route matrix on a single month's bill.
+ * **Only the pairs the planner reads.** `cluster()` groups on great-circle
+ * distance against a moving centroid, so grouping needs no road data at all;
+ * `sequence()` and `routeStats()` then read depot→stop and stop→stop pairs
+ * *within* a group. A cross-group pair — a Cork drop against a Belfast one —
+ * is never looked at. Asking for the full N×N matrix billed roughly six
+ * elements for every one consumed, which is what put €174 of route matrix on a
+ * single month's bill.
  *
- * Each group costs `(stops + 1)²` elements instead, and the caller passes only
- * the groups it has not already bought, so moving the radius and max-stops
- * knobs re-uses everything paid for so far.
+ * **Then: cached legs cost nothing.** `route_leg_cache` (migration 0021) is
+ * shared across instances, sessions and dispatchers, and these legs never
+ * expire — see the note there. Before it, the only thing holding a bought leg
+ * was a module-level object in one browser tab, so a refresh re-bought the
+ * lot. Re-planning orders that have been planned before now spends nothing.
+ *
+ * **Then: only the missing rectangle.** Even a group with one new drop in it
+ * used to re-buy its whole square, because the caller's gate keyed on the
+ * group's order set while the legs keyed on coordinates. `missingRequests()`
+ * decomposes what is left into the smallest rectangles that cover it, so
+ * adding a ninth drop to a group of eight costs 17 elements instead of 81.
  *
  * Traffic is not considered: a plan is built well before the truck rolls.
+ * That is also what makes the cache sound.
  *
  * **The truck is not known yet.** Grouping and sequencing happen before any
  * vehicle is assigned — the planner picks trucks longest-run-first, afterwards
@@ -1482,9 +1500,15 @@ export async function roadLegsForGroups(
     }
 
     const depot: LatLng = { lat: DEPOT.lat, lng: DEPOT.lng };
-    const legs: Record<string, RouteLeg> = {};
-    let message: string | null = null;
 
+    // Resolve every group's geometry first, because the cache is read per
+    // routing profile and a wide group routes under a different one than a
+    // tight one — see `matrixProfileKey`.
+    const planned: {
+      points: LatLng[];
+      region: MatrixRegion;
+      profile: string;
+    }[] = [];
     for (const group of groups) {
       const points: LatLng[] = [depot];
       for (const id of group) {
@@ -1494,31 +1518,188 @@ export async function roadLegsForGroups(
       // Depot plus one drop is the smallest run there is — it still needs the
       // out-and-back legs for the round-trip figure.
       if (points.length < 2) continue;
-
-      const { matrix, failure } = await routeMatrix(points, points, {
-        vehicle: DEFAULT_FLEET_VEHICLE,
+      // Measured over the whole group, then forced on every sub-request below.
+      // A single row of a mainland-Europe group fits a bounded region on its
+      // own; letting it route that way would file it under a profile the
+      // group's next cache read never asks for.
+      const region = matrixRegionFor(points);
+      planned.push({
+        points,
+        region,
+        profile: matrixProfileKey(DEFAULT_FLEET_VEHICLE, region),
       });
-      // One group failing must not throw away the groups that succeeded; the
-      // planner straight-lines whatever is missing and the dialog says so.
-      if (failure) {
-        message ??= ROUTING_MESSAGE[failure];
-        continue;
-      }
+    }
+    if (planned.length === 0) {
+      return { routed: false, message: "Nothing to route.", legs: {} };
+    }
 
-      for (let i = 0; i < points.length; i += 1) {
-        for (let j = 0; j < points.length; j += 1) {
-          const leg = matrix[i]?.[j];
-          if (i !== j && leg) {
-            legs[`${coordKey(points[i])}|${coordKey(points[j])}`] = leg;
+    /* --- the cache, one read per profile ---------------------------------- */
+
+    const cached = new Map<string, Map<string, RouteLeg>>();
+    for (const profile of new Set(planned.map((g) => g.profile))) {
+      const pairs: { from: LatLng; to: LatLng }[] = [];
+      for (const group of planned) {
+        if (group.profile !== profile) continue;
+        for (let i = 0; i < group.points.length; i += 1) {
+          for (let j = 0; j < group.points.length; j += 1) {
+            if (i !== j) {
+              pairs.push({ from: group.points[i], to: group.points[j] });
+            }
           }
         }
       }
+      cached.set(profile, await readLegCache(pairs, profile));
+    }
+
+    /* --- whatever is left, from HERE -------------------------------------- */
+
+    const legs: Record<string, RouteLeg> = {};
+    const fresh = new Map<string, CachedLeg[]>();
+    let message: string | null = null;
+
+    for (const { points, region, profile } of planned) {
+      const hits = cached.get(profile) ?? new Map<string, RouteLeg>();
+      const keys = points.map(coordKey);
+
+      // Cache hits go straight into the answer. A pair may already be present
+      // from an earlier group in this same call — two groups either side of a
+      // regroup usually share most of their drops.
+      for (let i = 0; i < points.length; i += 1) {
+        for (let j = 0; j < points.length; j += 1) {
+          if (i === j) continue;
+          const key = `${keys[i]}|${keys[j]}`;
+          const hit = hits.get(key);
+          if (hit && legs[key] === undefined) legs[key] = hit;
+        }
+      }
+
+      const has = (i: number, j: number) =>
+        legs[`${keys[i]}|${keys[j]}`] !== undefined;
+
+      for (const request of missingRequests(points.length, has)) {
+        const { matrix, failure } = await routeMatrix(
+          request.origins.map((i) => points[i]),
+          request.destinations.map((j) => points[j]),
+          { vehicle: DEFAULT_FLEET_VEHICLE, region },
+        );
+        // One group failing must not throw away the groups that succeeded; the
+        // planner straight-lines whatever is missing and the dialog says so.
+        if (failure) {
+          message ??= ROUTING_MESSAGE[failure];
+          continue;
+        }
+
+        for (let a = 0; a < request.origins.length; a += 1) {
+          for (let b = 0; b < request.destinations.length; b += 1) {
+            const i = request.origins[a];
+            const j = request.destinations[b];
+            if (i === j) continue;
+            const leg = matrix[a]?.[b];
+            if (!leg) continue;
+            const key = `${keys[i]}|${keys[j]}`;
+            if (legs[key] !== undefined) continue;
+            legs[key] = leg;
+            // Filed under the group's profile, which is exactly what the
+            // request was forced to use — so the next read finds it.
+            const batch = fresh.get(profile) ?? [];
+            batch.push({ fromKey: keys[i], toKey: keys[j], leg });
+            fresh.set(profile, batch);
+          }
+        }
+      }
+    }
+
+    // After the answer is assembled, never before: a slow write must not delay
+    // the plan, and a failed one must not lose it.
+    for (const [storedProfile, batch] of fresh) {
+      await writeLegCache(batch, storedProfile);
     }
 
     return { routed: Object.keys(legs).length > 0, message, legs };
   } catch (e) {
     return { routed: false, message: (e as Error).message, legs: {} };
   }
+}
+
+/** A rectangular slice of a group's matrix, as indices into its points. */
+interface MatrixRequest {
+  origins: number[];
+  destinations: number[];
+}
+
+/**
+ * The smallest set of rectangles covering every pair `has()` says is missing.
+ *
+ * HERE's matrix endpoint only takes rectangles — origins × destinations — so a
+ * scattering of missing pairs cannot be asked for directly. The shape that
+ * matters in practice is one new drop joining a group that is otherwise
+ * cached, and that is a row and a column, not a square.
+ *
+ * Three rectangles, in order:
+ *
+ * 1. `new × all` — points with no known pair in either direction. On a group
+ *    nothing is cached for, this is every point and the result is the full
+ *    square, exactly as before.
+ * 2. `old × new` — the returning half of those pairs.
+ * 3. whatever is still missing, as one rectangle over its origins and its
+ *    destinations. This catches the gaps an earlier partial failure left.
+ *
+ * Steps 1 and 2 over-buy only the diagonal, which the caller discards. If the
+ * three together would cost more than simply asking for the whole square, the
+ * whole square is returned instead — a decomposition that loses is worse than
+ * no decomposition.
+ */
+function missingRequests(
+  size: number,
+  has: (i: number, j: number) => boolean,
+): MatrixRequest[] {
+  const all = Array.from({ length: size }, (_, i) => i);
+  const missing = new Set<string>();
+  for (let i = 0; i < size; i += 1) {
+    for (let j = 0; j < size; j += 1) {
+      if (i !== j && !has(i, j)) missing.add(`${i}|${j}`);
+    }
+  }
+  if (missing.size === 0) return [];
+
+  const isNew = (p: number) =>
+    all.every(
+      (q) => q === p || (missing.has(`${p}|${q}`) && missing.has(`${q}|${p}`)),
+    );
+  const unseen = all.filter(isNew);
+  const known = all.filter((p) => !isNew(p));
+
+  const requests: MatrixRequest[] = [];
+  const covered = new Set<string>();
+  const cover = (origins: number[], destinations: number[]) => {
+    if (origins.length === 0 || destinations.length === 0) return;
+    requests.push({ origins, destinations });
+    for (const i of origins) {
+      for (const j of destinations) if (i !== j) covered.add(`${i}|${j}`);
+    }
+  };
+
+  cover(unseen, all);
+  cover(known, unseen);
+
+  const rest = [...missing].filter((k) => !covered.has(k));
+  if (rest.length > 0) {
+    const origins = new Set<number>();
+    const destinations = new Set<number>();
+    for (const k of rest) {
+      const [i, j] = k.split("|").map(Number);
+      origins.add(i);
+      destinations.add(j);
+    }
+    const asc = (a: number, b: number) => a - b;
+    cover([...origins].sort(asc), [...destinations].sort(asc));
+  }
+
+  const cost = requests.reduce(
+    (sum, r) => sum + r.origins.length * r.destinations.length,
+    0,
+  );
+  return cost < size * size ? requests : [{ origins: all, destinations: all }];
 }
 
 /* --- committing an auto-plan -------------------------------------------------- */
