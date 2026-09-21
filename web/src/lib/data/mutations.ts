@@ -34,6 +34,7 @@ import { DEFAULT_FLEET_VEHICLE } from "@/lib/routing/vehicle";
 import { coordKey } from "@/lib/format";
 import { DEPOT } from "@/lib/geo/reference";
 import { settleStopDelivered, syncLoadCompletion } from "@/lib/data/stop-delivery";
+import { mutateInChunks, selectInChunks } from "@/lib/data/in-chunks";
 
 /**
  * Writes.
@@ -590,10 +591,11 @@ export async function createLoad(
     }
 
     // Guard against two dispatchers planning the same order into two loads.
-    const { data: alreadyOn, error: clashError } = await supabase
-      .from("load_items")
-      .select("order_id")
-      .in("order_id", input.orderIds);
+    const { data: alreadyOn, error: clashError } = await selectInChunks<
+      { order_id: string }
+    >(input.orderIds, (batch) =>
+      supabase.from("load_items").select("order_id").in("order_id", batch),
+    );
 
     if (clashError) return { ok: false, message: clashError.message, loadId: null };
     if (alreadyOn && alreadyOn.length > 0) {
@@ -633,10 +635,14 @@ export async function createLoad(
       return { ok: false, message: itemsError.message, loadId: null };
     }
 
-    const { error: statusError } = await supabase
-      .from("orders")
-      .update({ status: "assigned", updated_at: new Date().toISOString() })
-      .in("id", input.orderIds);
+    // Idempotent — setting the same status twice is a no-op — so chunking
+    // without a transaction is safe here.
+    const { error: statusError } = await mutateInChunks(input.orderIds, (batch) =>
+      supabase
+        .from("orders")
+        .update({ status: "assigned", updated_at: new Date().toISOString() })
+        .in("id", batch),
+    );
 
     if (statusError) {
       return { ok: false, message: statusError.message, loadId: load.id };
@@ -1178,17 +1184,22 @@ export async function deleteOrders(ids: string[]): Promise<DeleteOrdersResult> {
 
     const supabase = await createClient();
 
-    const { data: orders, error: readError } = await supabase
-      .from("orders")
-      .select("id, crm_order_id, status")
-      .in("id", ids);
+    // Batched: "select all" in the Orders Queue is thousands of ids, and a
+    // single `.in()` that wide is a query string Cloudflare rejects outright.
+    const { data: orders, error: readError } = await selectInChunks<
+      { id: string; crm_order_id: string | null; status: string }
+    >(ids, (batch) =>
+      supabase.from("orders").select("id, crm_order_id, status").in("id", batch),
+    );
     if (readError) return { ok: false, message: readError.message, ...empty };
 
-    // One query rather than one per order: which of these are on a load at all.
-    const { data: items, error: itemError } = await supabase
-      .from("load_items")
-      .select("order_id")
-      .in("order_id", ids);
+    // One query per batch rather than one per order: which of these are on a
+    // load at all.
+    const { data: items, error: itemError } = await selectInChunks<
+      { order_id: string }
+    >(ids, (batch) =>
+      supabase.from("load_items").select("order_id").in("order_id", batch),
+    );
     if (itemError) return { ok: false, message: itemError.message, ...empty };
 
     const onALoad = new Set((items ?? []).map((i) => i.order_id as string));
@@ -1217,7 +1228,11 @@ export async function deleteOrders(ids: string[]): Promise<DeleteOrdersResult> {
       };
     }
 
-    const { error } = await supabase.from("orders").delete().in("id", deletable);
+    // Chunked, and safe to be non-atomic: re-deleting an order already gone is
+    // a no-op, so a failure part-way through settles on retry.
+    const { error } = await mutateInChunks(deletable, (batch) =>
+      supabase.from("orders").delete().in("id", batch),
+    );
     if (error) {
       return { ok: false, message: error.message, deleted: 0, deletedIds: [], blocked };
     }

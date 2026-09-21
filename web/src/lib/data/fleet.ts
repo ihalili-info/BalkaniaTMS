@@ -1,3 +1,4 @@
+import { selectInChunks } from "@/lib/data/in-chunks";
 import { haversineMeters } from "@/lib/format";
 import { routeLeg, routingConfigured, type RouteLeg } from "@/lib/routing/here";
 import { vehicleForTruck } from "@/lib/routing/vehicle";
@@ -148,6 +149,36 @@ const REGIME_RANK: Record<string, number> = {
 };
 
 /**
+ * How far back a completed load still gets its alerts and arrival visits read.
+ *
+ * Mirrors the default window of `recentlyCompletedOf()`, which is what decides
+ * whether Active Loads still renders the card at all.
+ */
+const STOP_DETAIL_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Whether a load's stops need `notifications` and `visit` filled in.
+ *
+ * Only Active Loads reads either field, and it renders exactly the active,
+ * planned and recently-completed loads — so hydrating the rest buys nothing
+ * and costs everything: every stop of every load ever run went into one
+ * `.in()` filter, and at ~1,500 stops that query string passed 60 KB and
+ * started timing out the whole dashboard. Keep this in step with
+ * `activeOf` / `plannedOf` / `recentlyCompletedOf` in `fleet-selectors.ts`.
+ */
+function needsStopDetail(row: {
+  status: string;
+  load_items?: { delivered_at: string | null }[] | null;
+}): boolean {
+  if (row.status === "active" || row.status === "planned") return true;
+  if (row.status !== "completed") return false;
+  const cutoff = Date.now() - STOP_DETAIL_WINDOW_MS;
+  return (row.load_items ?? []).some(
+    (i) => i.delivered_at !== null && Date.parse(i.delivered_at) >= cutoff,
+  );
+}
+
+/**
  * Loads with their stops, truck, driver and per-stop distances.
  *
  * One query with nested selects rather than a query per load — a dispatch
@@ -183,16 +214,29 @@ export async function getLoads(
   const driverById = new Map(drivers.map((d) => [d.id, d]));
   const orderById = new Map(orders.map((o) => [o.id, o]));
 
+  // Alerts and arrival-ring visits are read only for the stops that can
+  // actually display them — see `needsStopDetail`.
+  const stopIds = (loadRows ?? [])
+    .filter(needsStopDetail)
+    .flatMap((l) => (l.load_items ?? []).map((i: { id: string }) => i.id));
+
   // Which alerts have fired, so the UI does not have to guess.
-  const stopIds = (loadRows ?? []).flatMap((l) =>
-    (l.load_items ?? []).map((i: { id: string }) => i.id),
-  );
   const sentByStop = new Map<string, NotificationType[]>();
-  if (stopIds.length > 0) {
-    const { data: notes } = await supabase
-      .from("notifications")
-      .select("load_item_id, type")
-      .in("load_item_id", stopIds);
+  {
+    const { data: notes, error: noteError } = await selectInChunks<
+      { load_item_id: string; type: string }
+    >(stopIds, (batch) =>
+      supabase
+        .from("notifications")
+        .select("load_item_id, type")
+        .in("load_item_id", batch),
+    );
+    // Not swallowed. `load-menu` refuses to delete a load whose stops have
+    // alerts against them, so an error read as "no alerts" would offer to
+    // destroy the record of messages already sent to a customer.
+    if (noteError) {
+      throw new Error(`Could not load notifications: ${noteError.message}`);
+    }
     for (const n of notes ?? []) {
       const list = sentByStop.get(n.load_item_id) ?? [];
       list.push(n.type as NotificationType);
@@ -203,16 +247,31 @@ export async function getLoads(
   // The truck's most recent visit to each stop's arrival ring (migration 0014).
   // Ordered newest-first so the first row seen per stop is the one to keep.
   const visitByStop = new Map<string, Stop["visit"]>();
-  if (stopIds.length > 0) {
-    const { data: visits } = await supabase
-      .from("stop_visits")
-      .select(
-        "load_item_id, entered_at, last_seen_at, exited_at, min_distance_m, auto_delivered",
-      )
-      .in("load_item_id", stopIds)
-      .order("entered_at", { ascending: false });
+  {
+    const { data: visits, error: visitError } = await selectInChunks<{
+      load_item_id: string;
+      entered_at: string;
+      last_seen_at: string;
+      exited_at: string | null;
+      min_distance_m: number | string;
+      auto_delivered: boolean;
+    }>(stopIds, (batch) =>
+      supabase
+        .from("stop_visits")
+        .select(
+          "load_item_id, entered_at, last_seen_at, exited_at, min_distance_m, auto_delivered",
+        )
+        .in("load_item_id", batch)
+        // Sorted per batch; `newest` below re-establishes the ordering across
+        // batches, which a per-request sort cannot do on its own.
+        .order("entered_at", { ascending: false }),
+    );
+    if (visitError) {
+      throw new Error(`Could not load stop visits: ${visitError.message}`);
+    }
     for (const v of visits ?? []) {
-      if (visitByStop.has(v.load_item_id)) continue;
+      const seen = visitByStop.get(v.load_item_id);
+      if (seen && Date.parse(seen.entered_at) >= Date.parse(v.entered_at)) continue;
       visitByStop.set(v.load_item_id, {
         entered_at: v.entered_at,
         last_seen_at: v.last_seen_at,
