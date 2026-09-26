@@ -20,7 +20,13 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Icon, cx } from "@/components/ui";
-import { GEOFENCE_RADIUS_M, loadForTruck, nextStop } from "@/lib/fleet-selectors";
+import { formatClock } from "@/lib/format";
+import {
+  GEOFENCE_RADIUS_M,
+  activeOf,
+  loadForTruck,
+  nextStop,
+} from "@/lib/fleet-selectors";
 import { DEPOT } from "@/lib/geo/reference";
 import { MAP_DEFAULT_ZOOM, loadHereMaps, token, type HereNamespace } from "@/lib/maps";
 import type { LoadView, Order, Truck } from "@/lib/types";
@@ -71,6 +77,7 @@ export function HereCanvas({
   const holder = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<HereNamespace>(null);
   const hRef = useRef<HereNamespace>(null);
+  const uiRef = useRef<HereNamespace>(null);
   /** Every object we added, so a redraw can remove exactly its own. */
   const drawn = useRef<HereNamespace[]>([]);
   // Kept in a ref so re-drawing overlays does not need `onSelect` in its
@@ -105,7 +112,7 @@ export function HereCanvas({
 
         // Pan, scroll-zoom and pinch. Without this the map is a static image.
         new H.mapevents.Behavior(new H.mapevents.MapEvents(map));
-        H.ui.UI.createDefault(map, layers);
+        uiRef.current = H.ui.UI.createDefault(map, layers);
 
         const onResize = () => map.getViewPort().resize();
         window.addEventListener("resize", onResize);
@@ -132,8 +139,8 @@ export function HereCanvas({
     const brand = token("--color-brand", "#2f4bd6");
     const warn = token("--color-warn", "#b26a00");
     const ink = token("--color-ink", "#1c2126");
-    const inkSubtle = token("--color-ink-subtle", "#7b8798");
     const danger = token("--color-danger", "#c33227");
+    const ok = token("--color-ok", "#12855a");
     const surface = token("--color-surface", "#ffffff");
 
     // Clear what the previous pass drew. HERE objects are not React — nothing
@@ -224,12 +231,21 @@ export function HereCanvas({
           }),
         );
 
-        // Straight-line leg, drawn dashed so it never reads as a routed path.
-        // The routed ETA is a number on the board, not a shape on the map —
-        // painting a road here the truck may not be taking would be a lie.
+        // Straight-line legs, drawn dashed so they never read as a routed path.
+        // The routed figures are numbers on the board, not a shape on the map —
+        // painting a road here the truck may not be taking would be a lie. The
+        // selected truck's line runs through every stop it has left, in order;
+        // the rest show only the next leg so a busy map stays legible.
         const line = new H.geo.LineString();
         line.pushPoint(at);
-        line.pushPoint(target);
+        const ahead = active
+          ? (load?.stops ?? []).flatMap((s) =>
+              s.delivered_at === null && s.order.delivery_location
+                ? [s.order.delivery_location]
+                : [],
+            )
+          : [target];
+        for (const p of ahead) line.pushPoint(p);
         add(
           new H.map.Polyline(line, {
             style: {
@@ -238,28 +254,6 @@ export function HereCanvas({
               lineDash: [4, 4],
               lineCap: "round",
             },
-          }),
-        );
-
-        add(
-          new H.map.Marker(target, {
-            icon: icon(
-              // A teardrop pin, not a dot — the delivery stop is a fixed place
-              // a truck is heading *to*, and it needs to read differently from
-              // the round vehicle markers at a glance. Anchored at its tip so
-              // the point, not the centre, sits on the coordinate.
-              `<path d="M12 22s8-4.5 8-11.8A8 8 0 1 0 4 10.2C4 17.5 12 22 12 22z" fill="${
-                active ? ink : inkSubtle
-              }" stroke="${surface}" stroke-width="1.5"/>`,
-              24,
-              24,
-              12,
-              22,
-            ),
-            data: {
-              title: `${stop?.order.customer_name ?? "Stop"} — ${stop?.order.delivery_address ?? ""}`,
-            },
-            zIndex: 20,
           }),
         );
       }
@@ -285,6 +279,69 @@ export function HereCanvas({
       });
       marker.addEventListener("tap", () => select.current(truck.id));
       add(marker);
+    }
+
+    // Every stop of every active load — numbered in delivery order, green with
+    // a tick once delivered, dark while pending, with a ring on the next one.
+    // The selected load is drawn larger so its run reads at a glance among the
+    // rest. Drawn after the trucks' lines but below the truck markers.
+    for (const l of activeOf(loads)) {
+      const selectedLoad = l.truck_id === selectedId;
+      const next = nextStop(l);
+      const size = selectedLoad ? 28 : 20;
+      const r = selectedLoad ? 11 : 8;
+      const c = size / 2;
+      l.stops.forEach((stop, i) => {
+        const at = stop.order.delivery_location;
+        if (!at) return;
+        points.push(at);
+        const done = stop.delivered_at !== null;
+        const isNext = next?.id === stop.id;
+        const fill = done ? ok : selectedLoad ? brand : ink;
+        const ring = isNext
+          ? `<circle cx="${c}" cy="${c}" r="${r + 2.5}" fill="none" stroke="${warn}" stroke-width="2"/>`
+          : "";
+        const face = done
+          ? `<path d="M${c - r * 0.45} ${c} l${r * 0.32} ${r * 0.34} l${r * 0.62} -${r * 0.7}" fill="none" stroke="#fff" stroke-width="${
+              selectedLoad ? 2.2 : 1.6
+            }" stroke-linecap="round" stroke-linejoin="round"/>`
+          : `<text x="${c}" y="${c + (selectedLoad ? 4 : 3)}" text-anchor="middle" font-family="system-ui,sans-serif" font-size="${
+              selectedLoad ? 12 : 10
+            }" font-weight="700" fill="#fff">${i + 1}</text>`;
+        const state = done
+          ? `Delivered${stop.delivered_at ? ` ${esc(formatClock(stop.delivered_at))} UTC` : ""}`
+          : isNext
+            ? "Next stop"
+            : "Pending";
+        add(
+          new H.map.Marker(at, {
+            icon: icon(
+              `${ring}<circle cx="${c}" cy="${c}" r="${r}" fill="${fill}" stroke="${surface}" stroke-width="1.5" opacity="${
+                selectedLoad || isNext ? 1 : 0.8
+              }"/>${face}`,
+              size,
+              size,
+              c,
+              c,
+            ),
+            data: {
+              stopInfo: `<div style="font:12px system-ui,sans-serif;max-width:220px"><b>${esc(l.reference)} · stop ${i + 1}</b><br>${esc(
+                stop.order.customer_name,
+              )}<br><span style="color:#5b6675">${esc(stop.order.delivery_address)}</span><br><b>${state}</b></div>`,
+            },
+            zIndex: selectedLoad ? 30 : 22,
+          }),
+        ).addEventListener("tap", (evt: HereNamespace) => {
+          const ui = uiRef.current;
+          if (!ui) return;
+          for (const b of ui.getBubbles()) ui.removeBubble(b);
+          ui.addBubble(
+            new H.ui.InfoBubble(evt.target.getGeometry(), {
+              content: evt.target.getData().stopInfo,
+            }),
+          );
+        });
+      });
     }
 
     // Fit once. Re-fitting on every fix would yank the view out from under a
@@ -314,11 +371,16 @@ export function HereCanvas({
     if (!truck?.current_location) return;
 
     const load = loadForTruck(loads, truck.id);
-    const target = load ? nextStop(load)?.order.delivery_location : undefined;
+    // Every stop still to do, so the whole remaining run is in frame.
+    const ahead = (load?.stops ?? []).flatMap((s) =>
+      s.delivered_at === null && s.order.delivery_location
+        ? [s.order.delivery_location]
+        : [],
+    );
 
-    if (target) {
+    if (ahead.length > 0) {
       map.getViewModel().setLookAtData({
-        bounds: H.geo.Rect.coverPoints([truck.current_location, target]),
+        bounds: H.geo.Rect.coverPoints([truck.current_location, ...ahead]),
       });
     } else {
       map.setCenter(truck.current_location, true);

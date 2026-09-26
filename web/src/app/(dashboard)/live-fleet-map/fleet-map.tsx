@@ -11,7 +11,7 @@
  * and keeping these overlays.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Badge,
@@ -27,13 +27,21 @@ import {
   GEOFENCE_RADIUS_M,
   activeOf,
   loadForTruck,
+  loadProgress,
   nextStop,
   stopEtaMinutes,
 } from "@/lib/fleet-selectors";
+import { routeActiveLoad, type LoadRouteInfo } from "@/lib/data/mutations";
+import { formatDuration } from "@/lib/driver-hours";
 import { truckDuty, unavailabilityReason } from "@/lib/fleet-status";
-import { formatCoords, formatDistance, relativeTime } from "@/lib/format";
+import {
+  formatClock,
+  formatCoords,
+  formatDistance,
+  relativeTime,
+} from "@/lib/format";
 import { DEFAULT_VIEW, DEPOT, REFERENCE_PLACES } from "@/lib/geo/reference";
-import type { LatLng, LoadView, Order, Truck } from "@/lib/types";
+import type { LatLng, LoadView, Order, RouteLeg, Truck } from "@/lib/types";
 
 import { HereCanvas } from "./here-canvas";
 
@@ -61,8 +69,13 @@ export function FleetMap({
   /** Absent → the schematic below, which is to scale but has no roads. */
   hereMapsKey: string | null;
 }) {
+  // Open on a truck that is actually on a load, so the route panel has
+  // something to show; fall back to the first unit.
   const [selectedId, setSelectedId] = useState<string | null>(
-    trucks[0]?.id ?? null,
+    () =>
+      activeOf(loads).find((l) => l.truck_id !== null)?.truck_id ??
+      trucks[0]?.id ??
+      null,
   );
 
   const located = trucks.filter((t) => t.current_location !== null);
@@ -77,10 +90,11 @@ export function FleetMap({
       { lat: DEPOT.lat, lng: DEPOT.lng },
       ...REFERENCE_PLACES.map((p) => ({ lat: p.lat, lng: p.lng })),
       ...located.map((t) => t.current_location!),
-      ...loads.flatMap((l) => {
-        const stop = nextStop(l);
-        return stop?.order.delivery_location ? [stop.order.delivery_location] : [];
-      }),
+      ...activeOf(loads).flatMap((l) =>
+        l.stops.flatMap((s) =>
+          s.order.delivery_location ? [s.order.delivery_location] : [],
+        ),
+      ),
       ...pendingOrders.flatMap((o) =>
         o.delivery_location ? [o.delivery_location] : [],
       ),
@@ -167,6 +181,26 @@ export function FleetMap({
   const selected = trucks.find((t) => t.id === selectedId) ?? null;
   const selectedLoad = selected ? loadForTruck(loads, selected.id) : undefined;
   const selectedStop = selectedLoad ? nextStop(selectedLoad) : undefined;
+
+  // Road figures for the selected load. Fetched when it is selected, not when
+  // the page renders (every render bills routing), and remembered per load and
+  // per set of delivered stops so switching back and forth costs nothing.
+  const routeKey = selectedLoad
+    ? `${selectedLoad.id}|${selectedLoad.stops
+        .map((s) => (s.delivered_at ? "1" : "0"))
+        .join("")}`
+    : null;
+  const [routes, setRoutes] = useState<Record<string, LoadRouteInfo>>({});
+  const inflight = useRef(new Set<string>());
+  useEffect(() => {
+    if (!selectedLoad || !routeKey) return;
+    if (routeKey in routes || inflight.current.has(routeKey)) return;
+    inflight.current.add(routeKey);
+    void routeActiveLoad(selectedLoad.id)
+      .then((info) => setRoutes((prev) => ({ ...prev, [routeKey]: info })))
+      .finally(() => inflight.current.delete(routeKey));
+  }, [selectedLoad, routeKey, routes]);
+  const selectedRoute = routeKey ? (routes[routeKey] ?? null) : null;
 
   if (trucks.length === 0) {
     return (
@@ -320,6 +354,68 @@ export function FleetMap({
                 })}
               </g>
 
+              <g>
+                {activeOf(loads).flatMap((l) => {
+                  const isSelected = l.truck_id === selectedId;
+                  const next = nextStop(l);
+                  const r = view.marker * (isSelected ? 0.55 : 0.4);
+                  return l.stops.map((stop, i) => {
+                    if (!stop.order.delivery_location) return null;
+                    const at = view.project(stop.order.delivery_location);
+                    const done = stop.delivered_at !== null;
+                    const isNext = next?.id === stop.id;
+                    return (
+                      <g key={stop.id} opacity={isSelected || isNext ? 1 : 0.8}>
+                        {isNext ? (
+                          <circle
+                            cx={at.x}
+                            cy={at.y}
+                            r={r * 1.35}
+                            fill="none"
+                            stroke="var(--color-warn)"
+                            strokeWidth={1.5}
+                            vectorEffect="non-scaling-stroke"
+                          />
+                        ) : null}
+                        <circle
+                          cx={at.x}
+                          cy={at.y}
+                          r={r}
+                          fill={
+                            done
+                              ? "var(--color-ok)"
+                              : isSelected
+                                ? "var(--color-brand)"
+                                : "var(--color-ink)"
+                          }
+                          stroke="var(--color-surface)"
+                          strokeWidth={1}
+                          vectorEffect="non-scaling-stroke"
+                        >
+                          <title>
+                            {`${l.reference} · stop ${i + 1} — ${stop.order.customer_name} (${
+                              done ? "delivered" : isNext ? "next" : "pending"
+                            })`}
+                          </title>
+                        </circle>
+                        <text
+                          x={at.x}
+                          y={at.y}
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          fontSize={r * 1.15}
+                          fontWeight={700}
+                          fill="#fff"
+                          pointerEvents="none"
+                        >
+                          {done ? "\u2713" : i + 1}
+                        </text>
+                      </g>
+                    );
+                  });
+                })}
+              </g>
+
               {trucks.map((truck) => {
                 if (!truck.current_location) return null;
                 const at = view.project(truck.current_location);
@@ -348,23 +444,27 @@ export function FleetMap({
                           strokeWidth={1}
                           vectorEffect="non-scaling-stroke"
                         />
-                        <line
-                          x1={at.x}
-                          y1={at.y}
-                          x2={target.x}
-                          y2={target.y}
+                        <polyline
+                          points={[
+                            at,
+                            ...(active && load
+                              ? load.stops.flatMap((s) =>
+                                  s.delivered_at === null &&
+                                  s.order.delivery_location
+                                    ? [view.project(s.order.delivery_location)]
+                                    : [],
+                                )
+                              : [target]),
+                          ]
+                            .map((p) => `${p.x},${p.y}`)
+                            .join(" ")}
+                          fill="none"
                           stroke="var(--color-brand)"
                           strokeOpacity={active ? 0.8 : 0.25}
                           strokeWidth={2}
                           strokeDasharray="4 3"
                           strokeLinecap="round"
                           vectorEffect="non-scaling-stroke"
-                        />
-                        <circle
-                          cx={target.x}
-                          cy={target.y}
-                          r={view.marker * 0.22}
-                          fill="var(--color-ink)"
                         />
                       </>
                     ) : null}
@@ -434,7 +534,12 @@ export function FleetMap({
               {[
                 { color: "var(--color-brand)", label: "Truck / route leg", hollow: false },
                 { color: "var(--color-warn)", label: "Inside 5 km geofence", hollow: false },
-                { color: "var(--color-ink)", label: "Stop / depot", hollow: false },
+                { color: "var(--color-ok)", label: "Delivered stop", hollow: false },
+                {
+                  color: "var(--color-ink)",
+                  label: "Pending stop (numbered) / depot",
+                  hollow: false,
+                },
                 {
                   color: "var(--color-danger)",
                   label: "Pending order, not yet on a load",
@@ -481,6 +586,8 @@ export function FleetMap({
                 const stop = nextStop(load);
                 const truckId = load.truck_id;
                 const selectable = truckId !== null;
+                const isSelected = selectable && truckId === selectedId;
+                const progress = loadProgress(load);
                 return (
                   <li key={load.id}>
                     <button
@@ -509,6 +616,29 @@ export function FleetMap({
                             ? `${stop.order.customer_name} · ${load.driver?.full_name ?? "no driver"}`
                             : "No stops remaining"}
                         </span>
+                        <span className="mt-1.5 flex items-center gap-1.5">
+                          <span
+                            className="flex items-center gap-0.5"
+                            aria-hidden="true"
+                          >
+                            {load.stops.map((s) => (
+                              <span
+                                key={s.id}
+                                className={cx(
+                                  "size-1.5 rounded-full",
+                                  s.delivered_at
+                                    ? "bg-ok"
+                                    : s.id === stop?.id
+                                      ? "bg-warn"
+                                      : "bg-hairline-strong",
+                                )}
+                              />
+                            ))}
+                          </span>
+                          <span className="font-mono text-label tabular text-ink-subtle">
+                            {progress.done}/{progress.total} delivered
+                          </span>
+                        </span>
                       </span>
                       {stop?.distance_m != null ? (
                         <span className="shrink-0 font-mono text-data-sm tabular text-ink-muted">
@@ -518,6 +648,9 @@ export function FleetMap({
                         <LoadStatusBadge status={load.status} />
                       )}
                     </button>
+                    {isSelected ? (
+                      <LoadDetail load={load} route={selectedRoute} />
+                    ) : null}
                   </li>
                 );
               })}
@@ -656,6 +789,147 @@ export function FleetMap({
           </Card>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+const kmOf = (leg: RouteLeg) => `${Math.round(leg.distanceMeters / 1000)} km`;
+
+/**
+ * One load, opened up: road figures for the run, then every stop with its
+ * state — delivered (with the time), next, or still pending.
+ */
+function LoadDetail({
+  load,
+  route,
+}: {
+  load: LoadView;
+  route: LoadRouteInfo | null;
+}) {
+  const next = nextStop(load);
+  return (
+    <div className="border-t border-hairline bg-surface-muted/60 px-4 py-3">
+      <dl className="grid grid-cols-2 gap-3">
+        <RouteFigure
+          label="Whole run"
+          hint="depot, every stop, back"
+          leg={route?.planned ?? null}
+          loading={route === null}
+        />
+        <RouteFigure
+          label="Remaining"
+          hint="truck now, stops left, back"
+          leg={route?.remaining ?? null}
+          loading={route === null}
+        />
+      </dl>
+      {route && !route.routed ? (
+        <p className="mt-2 text-caption text-ink-subtle">
+          {route.message ??
+            "Road routing is not configured, so there is no distance or driving time for this load."}
+        </p>
+      ) : route?.message ? (
+        <p className="mt-2 text-caption text-warn">{route.message}</p>
+      ) : route ? (
+        <p className="mt-2 text-caption text-ink-subtle">
+          Driving time by road for this truck, without live traffic — it leaves
+          out unloading and the driver&rsquo;s breaks.
+        </p>
+      ) : null}
+
+      <ol className="mt-3 space-y-1">
+        {load.stops.map((stop, i) => {
+          const done = stop.delivered_at !== null;
+          const isNext = stop.id === next?.id;
+          const eta = isNext ? stopEtaMinutes(stop) : null;
+          return (
+            <li
+              key={stop.id}
+              className={cx(
+                "flex items-center gap-2 rounded-sm px-2 py-1.5",
+                isNext && "bg-surface ring-1 ring-warn-border",
+              )}
+            >
+              {done ? (
+                <Icon name="check_circle" filled className="text-[20px] text-ok" />
+              ) : (
+                <span
+                  className={cx(
+                    "flex size-5 shrink-0 items-center justify-center rounded-full font-mono text-label text-ink-inverse",
+                    isNext ? "bg-warn" : "bg-ink-subtle",
+                  )}
+                >
+                  {i + 1}
+                </span>
+              )}
+              <span className="min-w-0 flex-1">
+                <span
+                  className={cx(
+                    "block truncate text-body-sm",
+                    done ? "text-ink-muted" : "text-ink",
+                  )}
+                >
+                  {stop.order.customer_name}
+                </span>
+                <span className="block truncate text-caption text-ink-subtle">
+                  {stop.order.delivery_address}
+                </span>
+              </span>
+              <span className="shrink-0 text-right text-caption text-ink-subtle">
+                {done ? (
+                  <>
+                    <span className="block font-medium text-ok">Delivered</span>
+                    {stop.delivered_at
+                      ? `${formatClock(stop.delivered_at)} UTC`
+                      : null}
+                  </>
+                ) : isNext ? (
+                  <>
+                    <span className="block font-medium text-warn">Next</span>
+                    {eta !== null
+                      ? `${stop.eta_source === "routed" ? "" : "~"}${eta} min`
+                      : "no fix"}
+                  </>
+                ) : (
+                  "Pending"
+                )}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
+function RouteFigure({
+  label,
+  hint,
+  leg,
+  loading,
+}: {
+  label: string;
+  hint: string;
+  leg: RouteLeg | null;
+  loading: boolean;
+}) {
+  return (
+    <div>
+      <dt className="font-mono text-label uppercase text-ink-subtle">{label}</dt>
+      <dd className="text-heading tabular text-ink">
+        {leg ? (
+          <>
+            {kmOf(leg)}
+            <span className="mx-1 text-ink-subtle">·</span>
+            {formatDuration(leg.durationSeconds)}
+          </>
+        ) : loading ? (
+          <span className="text-ink-subtle">…</span>
+        ) : (
+          <span className="text-ink-subtle">—</span>
+        )}
+      </dd>
+      <dd className="text-caption text-ink-subtle">{hint}</dd>
     </div>
   );
 }

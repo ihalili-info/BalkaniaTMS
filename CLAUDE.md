@@ -812,6 +812,14 @@ just drops to straight-line maths with the UI saying so.
   Reg. 561/2006 break is on top; the dialog says so and warns past 9 h. With no
   key or on failure it shows a straight-line "≥ N km" and no time, never an
   estimate dressed as a figure.
+- **The Live Fleet Map shows every stop, and prices the selected load on
+  demand.** All stops of every active load are drawn numbered — green ✓ when
+  delivered, dark while pending, ringed for the next. The Active loads card
+  opens the selected load into its stop list plus two road figures (whole run,
+  and truck-now → stops left → depot) from `routeActiveLoad()`: two `v8/routes`
+  requests, **called by the client when a load is selected and remembered per
+  load + delivered-stops key — never on render**, for the reason in "A render
+  is not a page view" below. Free-flow, driving only.
 - **Live ETA is deliberately narrow.** `getLoads({ routedEtas: true })` — only
   Active Loads and the Live Fleet Map pass it, because the dashboard layout
   also calls `getLoads()` on every navigation — routes **only the next

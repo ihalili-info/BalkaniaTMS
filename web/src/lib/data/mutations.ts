@@ -1860,3 +1860,111 @@ export async function routePlannedRun(
     return none(e instanceof Error ? e.message : "Could not route the run.");
   }
 }
+
+/* --- pricing a load that is on the road ------------------------------------ */
+
+export interface LoadRouteInfo {
+  /** False when there is no road figure at all — see `message`. */
+  routed: boolean;
+  /** Depot → every stop → depot: the run as planned. Independent of where the truck is. */
+  planned: RouteLeg | null;
+  /** Truck's last fix → the stops not yet delivered → depot. Null if there is no fix or nothing left. */
+  remaining: RouteLeg | null;
+  message: string | null;
+}
+
+/**
+ * Road distance and driving time for one load, for the Live Fleet Map.
+ *
+ * **Asked for on demand, never on render.** The map page is dynamic and every
+ * render bills routing — see "A render is not a page view" in CLAUDE.md — so
+ * this is a server action the client calls for the load a dispatcher has
+ * *selected*, and remembers. Two HERE requests (planned, remaining), each one
+ * request however many stops, routed as the load's own truck.
+ *
+ * Time-independent free-flow figures, driving only: no live traffic, no
+ * unloading, no tachograph break. Degrades to `routed: false`, never throws.
+ */
+export async function routeActiveLoad(loadId: string): Promise<LoadRouteInfo> {
+  const none = (message: string | null): LoadRouteInfo => ({
+    routed: false,
+    planned: null,
+    remaining: null,
+    message,
+  });
+
+  try {
+    await requireSession();
+    if (!routingConfigured()) return none(null);
+
+    const supabase = await createClient();
+    const { data: load, error } = await supabase
+      .from("loads")
+      .select("id, truck_id, load_items(order_id, stop_sequence, delivered_at)")
+      .eq("id", loadId)
+      .maybeSingle();
+    if (error) return none(error.message);
+    if (!load) return none("That load no longer exists.");
+
+    const items = ((load.load_items ?? []) as {
+      order_id: string;
+      stop_sequence: number;
+      delivered_at: string | null;
+    }[]).sort((a, b) => a.stop_sequence - b.stop_sequence);
+    if (items.length === 0) return none("This load has no stops.");
+    if (items.length > MAX_VIA_POINTS) {
+      return none(`Too many stops to route in one request (${MAX_VIA_POINTS} max).`);
+    }
+
+    const { data: rows, error: ordersError } = await supabase
+      .from("orders_geo")
+      .select("id, lat, lng")
+      .in("id", items.map((i) => i.order_id));
+    if (ordersError) return none(ordersError.message);
+
+    const where = new Map<string, LatLng>();
+    for (const r of rows ?? []) {
+      if (typeof r.lat === "number" && typeof r.lng === "number") {
+        where.set(r.id, { lat: r.lat, lng: r.lng });
+      }
+    }
+    const located = items.flatMap((i) => {
+      const at = where.get(i.order_id);
+      return at ? [{ at, done: i.delivered_at !== null }] : [];
+    });
+    if (located.length === 0) return none("None of this load's stops has coordinates.");
+
+    const truck = load.truck_id
+      ? ((await getTrucks()).find((t) => t.id === load.truck_id) ?? null)
+      : null;
+    const vehicle = vehicleForTruck(truck);
+    const depot: LatLng = { lat: DEPOT.lat, lng: DEPOT.lng };
+
+    const pending = located.filter((s) => !s.done).map((s) => s.at);
+    const here = truck?.current_location ?? null;
+
+    const [planned, remaining] = await Promise.all([
+      routeThrough([depot, ...located.map((s) => s.at), depot], { vehicle }),
+      here && pending.length > 0
+        ? routeThrough([here, ...pending, depot], { vehicle })
+        : Promise.resolve({ route: null, failure: null }),
+    ]);
+
+    if (!planned.route && !remaining.route) {
+      return none(planned.failure ? ROUTING_MESSAGE[planned.failure] : null);
+    }
+
+    const skipped = items.length - located.length;
+    return {
+      routed: true,
+      planned: planned.route,
+      remaining: remaining.route,
+      message:
+        skipped > 0
+          ? `${skipped} stop${skipped === 1 ? " has" : "s have"} no coordinates and ${skipped === 1 ? "is" : "are"} not in these figures.`
+          : null,
+    };
+  } catch (e) {
+    return none(e instanceof Error ? e.message : "Could not route the load.");
+  }
+}
