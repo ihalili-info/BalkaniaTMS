@@ -68,6 +68,7 @@ export function DispatchActions({
           trucks={trucks}
           drivers={drivers}
           orders={unassignedOrders}
+          mapsKey={mapsKey}
           onClose={() => setPlanning(false)}
         />
       ) : null}

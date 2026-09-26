@@ -13,7 +13,9 @@ import {
   controlClass,
   cx,
 } from "@/components/ui";
+import { PickRouteMap } from "@/components/pick-route-map";
 import { createLoad } from "@/lib/data/mutations";
+import { DEPOT } from "@/lib/geo/reference";
 import { customsRegime, requiresCmr, HOME_COUNTRY } from "@/lib/regions";
 import { vehicleBreaches } from "@/lib/regions";
 import type { Driver, Order, Truck } from "@/lib/types";
@@ -29,12 +31,15 @@ export function PlanLoadDialog({
   trucks,
   drivers,
   orders,
+  mapsKey = null,
   onClose,
 }: {
   trucks: Truck[];
   drivers: Driver[];
   /** Unassigned orders only. */
   orders: Order[];
+  /** HERE Maps browser key; without one the map view is a schematic. */
+  mapsKey?: string | null;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -43,6 +48,7 @@ export function PlanLoadDialog({
   const [truckId, setTruckId] = useState(available[0]?.id ?? "");
   const [driverId, setDriverId] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
+  const [view, setView] = useState<"map" | "list">("map");
   const [cmr, setCmr] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -64,6 +70,7 @@ export function PlanLoadDialog({
     .filter((o): o is Order => o !== undefined);
 
   const truck = trucks.find((t) => t.id === truckId) ?? null;
+  const unlocated = orders.filter((o) => o.delivery_location === null).length;
 
   const destinations = [...new Set(stops.map((s) => s.delivery_country))];
   const regime = destinations
@@ -136,7 +143,7 @@ export function PlanLoadDialog({
         role="dialog"
         aria-modal="true"
         aria-label="Plan a load"
-        className="fixed inset-x-4 top-[4vh] z-50 mx-auto flex max-h-[92vh] max-w-4xl flex-col overflow-hidden rounded-lg border border-hairline bg-surface shadow-pop"
+        className="fixed inset-x-4 top-[4vh] z-50 mx-auto flex max-h-[92vh] max-w-5xl flex-col overflow-hidden rounded-lg border border-hairline bg-surface shadow-pop"
       >
         <header className="flex items-start justify-between gap-3 border-b border-hairline px-6 py-4">
           <div>
@@ -237,16 +244,70 @@ export function PlanLoadDialog({
           <div className="grid gap-5 lg:grid-cols-2">
             {/* --- available orders --- */}
             <section>
-              <h3 className="mb-2 text-heading text-ink">
-                Unassigned orders
-                <span className="ml-2 font-mono text-label uppercase text-ink-subtle">
-                  {orders.length}
-                </span>
-              </h3>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h3 className="text-heading text-ink">
+                  Unassigned orders
+                  <span className="ml-2 font-mono text-label uppercase text-ink-subtle">
+                    {orders.length}
+                  </span>
+                </h3>
+                <div
+                  role="group"
+                  aria-label="Order view"
+                  className="flex gap-0.5 rounded-sm bg-surface-muted p-0.5"
+                >
+                  {(
+                    [
+                      ["map", "Map", "map"],
+                      ["list", "List", "list"],
+                    ] as const
+                  ).map(([key, label, icon]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setView(key)}
+                      aria-pressed={view === key}
+                      className={cx(
+                        "flex items-center gap-1 rounded-sm px-2 py-1 text-caption transition-colors",
+                        view === key
+                          ? "bg-surface font-medium text-ink shadow-card"
+                          : "text-ink-muted hover:text-ink",
+                      )}
+                    >
+                      <Icon name={icon} className="text-[14px]" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               {orders.length === 0 ? (
                 <p className="rounded-sm border border-hairline bg-surface-muted px-3 py-4 text-caption text-ink-subtle">
                   Nothing waiting. Import orders on the Orders Queue.
                 </p>
+              ) : view === "map" ? (
+                <>
+                  <PickRouteMap
+                    apiKey={mapsKey}
+                    depot={DEPOT}
+                    orders={orders}
+                    picked={picked}
+                    onToggle={toggle}
+                  />
+                  <p className="mt-2 text-caption text-ink-subtle">
+                    Click a drop to add it as the next stop; click a numbered
+                    one to take it off. The line is depot → stops → depot in a
+                    straight line, not the road.
+                  </p>
+                  {unlocated > 0 ? (
+                    <p className="mt-1 flex items-start gap-1.5 text-caption text-warn">
+                      <Icon name="wrong_location" className="mt-px text-[14px]" />
+                      {unlocated} order{unlocated === 1 ? " has" : "s have"} no
+                      coordinates and cannot be shown on the map — pick{" "}
+                      {unlocated === 1 ? "it" : "them"} from the list view, or
+                      fix the address on the Orders Queue.
+                    </p>
+                  ) : null}
+                </>
               ) : (
                 <ul className="max-h-80 space-y-1 overflow-y-auto rounded-sm border border-hairline p-1">
                   {orders.map((o) => {
@@ -323,6 +384,14 @@ export function PlanLoadDialog({
                           {o.delivery_address}
                         </span>
                       </span>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${o.customer_name} from the route`}
+                        onClick={() => toggle(o.id)}
+                        className="shrink-0 text-ink-subtle transition-colors hover:text-danger"
+                      >
+                        <Icon name="close" className="text-[16px]" />
+                      </button>
                       <span className="flex shrink-0 flex-col">
                         <button
                           type="button"
