@@ -48,7 +48,6 @@ export function PlanLoadDialog({
   const [truckId, setTruckId] = useState(available[0]?.id ?? "");
   const [driverId, setDriverId] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
-  const [view, setView] = useState<"map" | "list">("map");
   const [cmr, setCmr] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -143,7 +142,7 @@ export function PlanLoadDialog({
         role="dialog"
         aria-modal="true"
         aria-label="Plan a load"
-        className="fixed inset-x-4 top-[4vh] z-50 mx-auto flex max-h-[92vh] max-w-5xl flex-col overflow-hidden rounded-lg border border-hairline bg-surface shadow-pop"
+        className="fixed inset-x-3 top-[2vh] z-50 mx-auto flex max-h-[96vh] max-w-[96rem] flex-col overflow-hidden rounded-lg border border-hairline bg-surface shadow-pop"
       >
         <header className="flex items-start justify-between gap-3 border-b border-hairline px-6 py-4">
           <div>
@@ -183,7 +182,9 @@ export function PlanLoadDialog({
                 value={truckId}
                 onChange={(e) => setTruckId(e.target.value)}
               >
-                {available.length === 0 ? <option value="">None available</option> : null}
+                {available.length === 0 ? (
+                  <option value="">None available</option>
+                ) : null}
                 {available.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.license_plate}
@@ -222,11 +223,16 @@ export function PlanLoadDialog({
             <Field
               label="CMR number"
               htmlFor="pl-cmr"
-              hint={needsCmr ? "Required for this movement" : "International only"}
+              hint={
+                needsCmr ? "Required for this movement" : "International only"
+              }
             >
               <input
                 id="pl-cmr"
-                className={cx(controlClass, needsCmr && cmr.trim() === "" && "border-warn")}
+                className={cx(
+                  controlClass,
+                  needsCmr && cmr.trim() === "" && "border-warn",
+                )}
                 value={cmr}
                 onChange={(e) => setCmr(e.target.value)}
                 placeholder={needsCmr ? "CMR-IE-…" : "not needed"}
@@ -241,50 +247,15 @@ export function PlanLoadDialog({
             </p>
           ) : null}
 
-          <div className="grid gap-5 lg:grid-cols-2">
-            {/* --- available orders --- */}
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+            {/* --- map: click a drop to add it to the route --- */}
             <section>
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <h3 className="text-heading text-ink">
-                  Unassigned orders
-                  <span className="ml-2 font-mono text-label uppercase text-ink-subtle">
-                    {orders.length}
-                  </span>
-                </h3>
-                <div
-                  role="group"
-                  aria-label="Order view"
-                  className="flex gap-0.5 rounded-sm bg-surface-muted p-0.5"
-                >
-                  {(
-                    [
-                      ["map", "Map", "map"],
-                      ["list", "List", "list"],
-                    ] as const
-                  ).map(([key, label, icon]) => (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => setView(key)}
-                      aria-pressed={view === key}
-                      className={cx(
-                        "flex items-center gap-1 rounded-sm px-2 py-1 text-caption transition-colors",
-                        view === key
-                          ? "bg-surface font-medium text-ink shadow-card"
-                          : "text-ink-muted hover:text-ink",
-                      )}
-                    >
-                      <Icon name={icon} className="text-[14px]" />
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <h3 className="mb-2 text-heading text-ink">Map</h3>
               {orders.length === 0 ? (
                 <p className="rounded-sm border border-hairline bg-surface-muted px-3 py-4 text-caption text-ink-subtle">
                   Nothing waiting. Import orders on the Orders Queue.
                 </p>
-              ) : view === "map" ? (
+              ) : (
                 <>
                   <PickRouteMap
                     apiKey={mapsKey}
@@ -292,6 +263,7 @@ export function PlanLoadDialog({
                     orders={orders}
                     picked={picked}
                     onToggle={toggle}
+                    heightClass="h-[58vh] min-h-[24rem]"
                   />
                   <p className="mt-2 text-caption text-ink-subtle">
                     Click a drop to add it as the next stop; click a numbered
@@ -300,132 +272,152 @@ export function PlanLoadDialog({
                   </p>
                   {unlocated > 0 ? (
                     <p className="mt-1 flex items-start gap-1.5 text-caption text-warn">
-                      <Icon name="wrong_location" className="mt-px text-[14px]" />
+                      <Icon
+                        name="wrong_location"
+                        className="mt-px text-[14px]"
+                      />
                       {unlocated} order{unlocated === 1 ? " has" : "s have"} no
-                      coordinates and cannot be shown on the map — pick{" "}
-                      {unlocated === 1 ? "it" : "them"} from the list view, or
-                      fix the address on the Orders Queue.
+                      coordinates and cannot be shown on the map — tick{" "}
+                      {unlocated === 1 ? "it" : "them"} in the list, or fix the
+                      address on the Orders Queue.
                     </p>
                   ) : null}
                 </>
-              ) : (
-                <ul className="max-h-80 space-y-1 overflow-y-auto rounded-sm border border-hairline p-1">
-                  {orders.map((o) => {
-                    const on = picked.includes(o.id);
-                    return (
-                      <li key={o.id}>
-                        <label
-                          className={cx(
-                            "flex cursor-pointer items-start gap-2 rounded-sm px-2.5 py-2 transition-colors",
-                            on ? "bg-brand-soft" : "hover:bg-surface-muted",
-                          )}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={on}
-                            onChange={() => toggle(o.id)}
-                            className="mt-0.5 size-3.5 accent-brand"
-                          />
-                          <span className="min-w-0 flex-1">
-                            <span className="flex flex-wrap items-center gap-x-2">
-                              <span className="text-body-sm font-medium text-ink">
-                                {o.customer_name}
-                              </span>
-                              <span className="font-mono text-data-sm text-ink-subtle">
-                                {o.crm_order_id}
-                              </span>
-                              <CountryChip code={o.delivery_country} />
-                            </span>
-                            <span className="block truncate text-caption text-ink-subtle">
-                              {o.delivery_address}
-                            </span>
-                            {o.delivery_location === null ? (
-                              <Badge tone="danger" className="mt-1">
-                                No coordinates
-                              </Badge>
-                            ) : null}
-                          </span>
-                        </label>
-                      </li>
-                    );
-                  })}
-                </ul>
               )}
             </section>
 
-            {/* --- the route --- */}
-            <section>
-              <h3 className="mb-2 text-heading text-ink">
-                Stop sequence
-                <span className="ml-2 font-mono text-label uppercase text-ink-subtle">
-                  {stops.length}
-                </span>
-              </h3>
-              {stops.length === 0 ? (
-                <p className="rounded-sm border border-dashed border-hairline-strong px-3 py-8 text-center text-caption text-ink-subtle">
-                  Tick orders on the left. Their order here is the order the
-                  driver runs them.
-                </p>
-              ) : (
-                <ol className="space-y-1 rounded-sm border border-hairline p-1">
-                  {stops.map((o, i) => (
-                    <li
-                      key={o.id}
-                      className="flex items-center gap-2 rounded-sm px-2 py-1.5 hover:bg-surface-muted"
-                    >
-                      <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-brand font-mono text-label text-ink-inverse">
-                        {i + 1}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-body-sm text-ink">
-                          {o.customer_name}
-                        </span>
-                        <span className="block truncate text-caption text-ink-subtle">
-                          {o.delivery_address}
-                        </span>
-                      </span>
-                      <button
-                        type="button"
-                        aria-label={`Remove ${o.customer_name} from the route`}
-                        onClick={() => toggle(o.id)}
-                        className="shrink-0 text-ink-subtle transition-colors hover:text-danger"
-                      >
-                        <Icon name="close" className="text-[16px]" />
-                      </button>
-                      <span className="flex shrink-0 flex-col">
-                        <button
-                          type="button"
-                          aria-label="Move earlier"
-                          disabled={i === 0}
-                          onClick={() => move(i, -1)}
-                          className="text-ink-subtle transition-colors hover:text-ink disabled:opacity-30"
-                        >
-                          <Icon name="expand_less" className="text-[16px]" />
-                        </button>
-                        <button
-                          type="button"
-                          aria-label="Move later"
-                          disabled={i === stops.length - 1}
-                          onClick={() => move(i, 1)}
-                          className="text-ink-subtle transition-colors hover:text-ink disabled:opacity-30"
-                        >
-                          <Icon name="expand_more" className="text-[16px]" />
-                        </button>
-                      </span>
-                    </li>
-                  ))}
-                </ol>
-              )}
-
-              {regime && regime !== "domestic" ? (
-                <p className="mt-3 flex flex-wrap items-center gap-2">
-                  <span className="font-mono text-label uppercase text-ink-subtle">
-                    Customs
+            <div className="flex min-w-0 flex-col gap-5">
+              {/* --- available orders --- */}
+              <section>
+                <h3 className="mb-2 text-heading text-ink">
+                  Unassigned orders
+                  <span className="ml-2 font-mono text-label uppercase text-ink-subtle">
+                    {orders.length}
                   </span>
-                  <CustomsBadge regime={regime} full />
-                </p>
-              ) : null}
-            </section>
+                </h3>
+                {orders.length === 0 ? (
+                  <p className="rounded-sm border border-hairline bg-surface-muted px-3 py-4 text-caption text-ink-subtle">
+                    Nothing waiting. Import orders on the Orders Queue.
+                  </p>
+                ) : (
+                  <ul className="max-h-[24vh] space-y-1 overflow-y-auto rounded-sm border border-hairline p-1">
+                    {orders.map((o) => {
+                      const on = picked.includes(o.id);
+                      return (
+                        <li key={o.id}>
+                          <label
+                            className={cx(
+                              "flex cursor-pointer items-start gap-2 rounded-sm px-2.5 py-2 transition-colors",
+                              on ? "bg-brand-soft" : "hover:bg-surface-muted",
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              onChange={() => toggle(o.id)}
+                              className="mt-0.5 size-3.5 accent-brand"
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="flex flex-wrap items-center gap-x-2">
+                                <span className="text-body-sm font-medium text-ink">
+                                  {o.customer_name}
+                                </span>
+                                <span className="font-mono text-data-sm text-ink-subtle">
+                                  {o.crm_order_id}
+                                </span>
+                                <CountryChip code={o.delivery_country} />
+                              </span>
+                              <span className="block truncate text-caption text-ink-subtle">
+                                {o.delivery_address}
+                              </span>
+                              {o.delivery_location === null ? (
+                                <Badge tone="danger" className="mt-1">
+                                  No coordinates
+                                </Badge>
+                              ) : null}
+                            </span>
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </section>
+
+              {/* --- the route --- */}
+              <section>
+                <h3 className="mb-2 text-heading text-ink">
+                  Stop sequence
+                  <span className="ml-2 font-mono text-label uppercase text-ink-subtle">
+                    {stops.length}
+                  </span>
+                </h3>
+                {stops.length === 0 ? (
+                  <p className="rounded-sm border border-dashed border-hairline-strong px-3 py-8 text-center text-caption text-ink-subtle">
+                    Click drops on the map or tick orders above. Their order
+                    here is the order the driver runs them.
+                  </p>
+                ) : (
+                  <ol className="max-h-[24vh] space-y-1 overflow-y-auto rounded-sm border border-hairline p-1">
+                    {stops.map((o, i) => (
+                      <li
+                        key={o.id}
+                        className="flex items-center gap-2 rounded-sm px-2 py-1.5 hover:bg-surface-muted"
+                      >
+                        <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-brand font-mono text-label text-ink-inverse">
+                          {i + 1}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-body-sm text-ink">
+                            {o.customer_name}
+                          </span>
+                          <span className="block truncate text-caption text-ink-subtle">
+                            {o.delivery_address}
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          aria-label={`Remove ${o.customer_name} from the route`}
+                          onClick={() => toggle(o.id)}
+                          className="shrink-0 text-ink-subtle transition-colors hover:text-danger"
+                        >
+                          <Icon name="close" className="text-[16px]" />
+                        </button>
+                        <span className="flex shrink-0 flex-col">
+                          <button
+                            type="button"
+                            aria-label="Move earlier"
+                            disabled={i === 0}
+                            onClick={() => move(i, -1)}
+                            className="text-ink-subtle transition-colors hover:text-ink disabled:opacity-30"
+                          >
+                            <Icon name="expand_less" className="text-[16px]" />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="Move later"
+                            disabled={i === stops.length - 1}
+                            onClick={() => move(i, 1)}
+                            className="text-ink-subtle transition-colors hover:text-ink disabled:opacity-30"
+                          >
+                            <Icon name="expand_more" className="text-[16px]" />
+                          </button>
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+
+                {regime && regime !== "domestic" ? (
+                  <p className="mt-3 flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-label uppercase text-ink-subtle">
+                      Customs
+                    </span>
+                    <CustomsBadge regime={regime} full />
+                  </p>
+                ) : null}
+              </section>
+            </div>
           </div>
 
           {error ? (
