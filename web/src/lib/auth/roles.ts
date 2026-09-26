@@ -71,6 +71,15 @@ export const MODULES: AppModule[] = [
     roles: ALL,
   },
   {
+    // Every order with a delivery location, green if delivered and red if not.
+    id: "orders-map",
+    href: "/orders-map",
+    label: "Orders Map",
+    icon: "pin_drop",
+    group: "Dispatch",
+    roles: ALL,
+  },
+  {
     id: "fleet",
     href: "/fleet",
     label: "Fleet",

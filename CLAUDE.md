@@ -112,7 +112,7 @@ keep it and `supabase/migrations/` in sync.
   - `src/components/app-shell.tsx` — dark navigation rail + light topbar, wraps all dashboard routes
   - `src/components/ui/index.tsx` — Card, Button, Badge, StatTile, Table, Progress, EmptyState
   - `src/components/charts.tsx` — dependency-free SVG charts
-  - `src/app/(dashboard)/` — the 7 nav sections: `active-loads`, `orders-queue`, `live-fleet-map`, `fleet` (Trucks / Drivers tabs), `analytics`, `crm-errors`, `integration-settings`
+  - `src/app/(dashboard)/` — the 8 nav sections: `active-loads`, `orders-queue`, `live-fleet-map`, `orders-map` (every geocoded order, green = delivered, red = not; filterable by received day), `fleet` (Trucks / Drivers tabs), `analytics`, `crm-errors`, `integration-settings`
   - `src/lib/data/crm-errors.ts` — reader behind the CRM Errors page (Insight, both roles): orders the CRM pushed that were refused and are **still not in `orders`** (latest reason per ref, translated by `describeRejection`), cancellations that need doing by hand because the order is on a load, and pending orders with no coordinates. Reads `crm_webhook_deliveries` through RLS and **never selects `payload`** (customer PII). Connector health (token, URL, body shape) stays on the admin-only CRM feed card.
   - `src/lib/auth/roles.ts` — roles + the module registry. **Add a module or change
     who can see one here, nowhere else.**
