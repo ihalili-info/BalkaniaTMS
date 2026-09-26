@@ -803,6 +803,15 @@ just drops to straight-line maths with the UI saying so.
   The old gate keyed on the group's *order set* while the legs keyed on
   *coordinates*, so excluding a single drop re-bought two whole squares. Don't
   reintroduce that asymmetry.
+- **Plan load prices the hand-built run.** `routePlannedRun()` in
+  `mutations.ts` → `routeThrough()` in `here.ts`: depot → stops in the picked
+  order → depot as **one** `v8/routes` request (`via=` per intermediate stop,
+  50 max), routed as the *chosen truck* (`vehicleForTruck`), time-independent,
+  sections summed. The dialog debounces it 700 ms, so a run of clicks is one
+  billed transaction. The time is **driving only** — no unloading, and the
+  Reg. 561/2006 break is on top; the dialog says so and warns past 9 h. With no
+  key or on failure it shows a straight-line "≥ N km" and no time, never an
+  estimate dressed as a figure.
 - **Live ETA is deliberately narrow.** `getLoads({ routedEtas: true })` — only
   Active Loads and the Live Fleet Map pass it, because the dashboard layout
   also calls `getLoads()` on every navigation — routes **only the next

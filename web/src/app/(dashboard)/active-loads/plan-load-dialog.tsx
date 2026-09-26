@@ -14,7 +14,14 @@ import {
   cx,
 } from "@/components/ui";
 import { PickRouteMap } from "@/components/pick-route-map";
-import { createLoad } from "@/lib/data/mutations";
+import { createLoad, routePlannedRun } from "@/lib/data/mutations";
+import type { PlannedRunRoute } from "@/lib/data/mutations";
+import {
+  CONTINUOUS_DRIVING_LIMIT_S,
+  DAILY_DRIVING_LIMIT_S,
+  formatDuration,
+} from "@/lib/driver-hours";
+import { haversineMeters } from "@/lib/format";
 import { DEPOT } from "@/lib/geo/reference";
 import { customsRegime, requiresCmr, HOME_COUNTRY } from "@/lib/regions";
 import { vehicleBreaches } from "@/lib/regions";
@@ -69,7 +76,47 @@ export function PlanLoadDialog({
     .filter((o): o is Order => o !== undefined);
 
   const truck = trucks.find((t) => t.id === truckId) ?? null;
+
+  /* --- the run's road distance and driving time ------------------------- */
+
+  // Re-priced as the run changes, one HERE request however many stops. The
+  // figure carries the key it was computed for, so "is it stale?" is derived
+  // rather than a flag set from inside an effect.
+  const runKey = `${truckId}|${picked.join(",")}`;
+  const [run, setRun] = useState<{ key: string; result: PlannedRunRoute } | null>(
+    null,
+  );
+  useEffect(() => {
+    if (picked.length === 0) return;
+    let cancelled = false;
+    // Debounced: a dispatcher clicking through eight drops should cost one
+    // routing call, not eight.
+    const timer = setTimeout(async () => {
+      const result = await routePlannedRun(picked, truckId || null);
+      if (!cancelled) setRun({ key: runKey, result });
+    }, 700);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [picked, truckId, runKey]);
   const unlocated = orders.filter((o) => o.delivery_location === null).length;
+
+  // What is always knowable: the straight-line length of depot → stops → depot.
+  // A floor under the road distance, shown when routing is unavailable.
+  const straightLineKm = useMemo(() => {
+    const path = [
+      { lat: DEPOT.lat, lng: DEPOT.lng },
+      ...stops.flatMap((o) => (o.delivery_location ? [o.delivery_location] : [])),
+      { lat: DEPOT.lat, lng: DEPOT.lng },
+    ];
+    let m = 0;
+    for (let i = 1; i < path.length; i += 1) m += haversineMeters(path[i - 1], path[i]);
+    return m / 1000;
+  }, [stops]);
+
+  const runFresh = run?.key === runKey ? run.result : null;
+  const runLoading = picked.length > 0 && runFresh === null;
 
   const destinations = [...new Set(stops.map((s) => s.delivery_country))];
   const regime = destinations
@@ -247,10 +294,71 @@ export function PlanLoadDialog({
             </p>
           ) : null}
 
-          <div className="grid gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
             {/* --- map: click a drop to add it to the route --- */}
             <section>
-              <h3 className="mb-2 text-heading text-ink">Map</h3>
+              <div className="mb-2 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+                <h3 className="text-heading text-ink">Map</h3>
+                <dl className="flex flex-wrap gap-x-6 gap-y-1">
+                  <RunFigure
+                    label="Round trip"
+                    value={
+                      picked.length === 0
+                        ? "—"
+                        : runFresh?.routed
+                          ? `${Math.round(runFresh.distanceMeters! / 1000)} km`
+                          : runLoading
+                            ? "…"
+                            : `≥ ${Math.round(straightLineKm)} km`
+                    }
+                    hint={
+                      runFresh?.routed
+                        ? "by road, depot and back"
+                        : picked.length > 0 && !runLoading
+                          ? "straight line — no road figure"
+                          : undefined
+                    }
+                  />
+                  <RunFigure
+                    label="Driving time"
+                    value={
+                      picked.length === 0
+                        ? "—"
+                        : runFresh?.routed
+                          ? formatDuration(runFresh.durationSeconds!)
+                          : runLoading
+                            ? "…"
+                            : "—"
+                    }
+                    hint={runFresh?.routed ? "excludes unloading" : undefined}
+                  />
+                  <RunFigure label="Stops" value={String(picked.length)} />
+                </dl>
+              </div>
+              {runFresh?.routed &&
+              runFresh.durationSeconds! > DAILY_DRIVING_LIMIT_S ? (
+                <p className="mb-2 flex items-start gap-2 rounded-sm border border-warn-border bg-warn-soft px-3 py-2 text-caption text-ink-muted">
+                  <Icon name="schedule" className="mt-px text-[15px] text-warn" />
+                  {formatDuration(runFresh.durationSeconds!)} of driving is over
+                  the 9 h daily limit (Reg. 561/2006; 10 h at most twice a
+                  week) — this run needs a rest day or a second driver.
+                </p>
+              ) : runFresh?.routed &&
+                runFresh.durationSeconds! > CONTINUOUS_DRIVING_LIMIT_S ? (
+                <p className="mb-2 text-caption text-ink-subtle">
+                  Over 4 h 30 of driving — the driver must take a 45 min break
+                  on the way, on top of this time.
+                </p>
+              ) : null}
+              {picked.length > 0 && !runLoading && runFresh && !runFresh.routed ? (
+                <p className="mb-2 text-caption text-ink-subtle">
+                  {runFresh.message ??
+                    "Road routing is not configured, so only the straight-line distance is shown."}
+                </p>
+              ) : null}
+              {runFresh?.routed && runFresh.message ? (
+                <p className="mb-2 text-caption text-warn">{runFresh.message}</p>
+              ) : null}
               {orders.length === 0 ? (
                 <p className="rounded-sm border border-hairline bg-surface-muted px-3 py-4 text-caption text-ink-subtle">
                   Nothing waiting. Import orders on the Orders Queue.
@@ -263,7 +371,7 @@ export function PlanLoadDialog({
                     orders={orders}
                     picked={picked}
                     onToggle={toggle}
-                    heightClass="h-[58vh] min-h-[24rem]"
+                    heightClass="h-[66vh] min-h-[28rem]"
                   />
                   <p className="mt-2 text-caption text-ink-subtle">
                     Click a drop to add it as the next stop; click a numbered
@@ -450,5 +558,30 @@ export function PlanLoadDialog({
         </footer>
       </div>
     </>
+  );
+}
+
+/** One label / figure pair in the route summary strip. */
+function RunFigure({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+}) {
+  return (
+    <div>
+      <dt className="font-mono text-label uppercase text-ink-subtle">{label}</dt>
+      <dd className="text-heading tabular text-ink">
+        {value}
+        {hint ? (
+          <span className="ml-1.5 text-caption font-normal text-ink-subtle">
+            {hint}
+          </span>
+        ) : null}
+      </dd>
+    </div>
   );
 }

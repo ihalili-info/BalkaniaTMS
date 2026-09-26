@@ -21,7 +21,9 @@ import {
   ROUTING_MESSAGE,
   matrixProfileKey,
   matrixRegionFor,
+  MAX_VIA_POINTS,
   routeMatrix,
+  routeThrough,
   routingConfigured,
   type MatrixRegion,
 } from "@/lib/routing/here";
@@ -30,7 +32,8 @@ import {
   writeLegCache,
   type CachedLeg,
 } from "@/lib/routing/leg-cache";
-import { DEFAULT_FLEET_VEHICLE } from "@/lib/routing/vehicle";
+import { DEFAULT_FLEET_VEHICLE, vehicleForTruck } from "@/lib/routing/vehicle";
+import { getTrucks } from "@/lib/data/fleet";
 import { coordKey } from "@/lib/format";
 import { DEPOT } from "@/lib/geo/reference";
 import { settleStopDelivered, syncLoadCompletion } from "@/lib/data/stop-delivery";
@@ -1771,5 +1774,89 @@ export async function commitPlan(
     };
   } catch (e) {
     return { ok: false, message: (e as Error).message, created: 0 };
+  }
+}
+
+/* --- pricing a hand-built run ------------------------------------------------ */
+
+export interface PlannedRunRoute {
+  /** False when there is no road figure — no key, a failure, or too few points. */
+  routed: boolean;
+  distanceMeters: number | null;
+  durationSeconds: number | null;
+  /** Why `routed` is false, or a caveat on a figure that is. */
+  message: string | null;
+}
+
+/**
+ * Road distance and driving time for a run the dispatcher is building by hand:
+ * depot → the stops in the order given → depot, routed as **the chosen truck**.
+ *
+ * One HERE request however many stops, so the Plan-load dialog can re-price the
+ * run as it changes (debounced on the client). Time-independent, driving only —
+ * it does not include unloading or the tachograph break, and the caller says so.
+ * Degrades to `routed: false` rather than throwing, like every routing call.
+ */
+export async function routePlannedRun(
+  orderIds: string[],
+  truckId: string | null,
+): Promise<PlannedRunRoute> {
+  const none = (message: string | null): PlannedRunRoute => ({
+    routed: false,
+    distanceMeters: null,
+    durationSeconds: null,
+    message,
+  });
+
+  try {
+    await requireSession();
+    if (!routingConfigured()) return none(null);
+    if (orderIds.length === 0) return none(null);
+    if (orderIds.length > MAX_VIA_POINTS) {
+      return none(`Too many stops to route in one request (${MAX_VIA_POINTS} max).`);
+    }
+
+    const supabase = await createClient();
+    const { data: rows, error } = await supabase
+      .from("orders_geo")
+      .select("id, lat, lng")
+      .in("id", orderIds);
+    if (error) return none(error.message);
+
+    const byId = new Map<string, LatLng>();
+    for (const r of rows ?? []) {
+      if (typeof r.lat === "number" && typeof r.lng === "number") {
+        byId.set(r.id, { lat: r.lat, lng: r.lng });
+      }
+    }
+    // The client's order is the run; a stop with no coordinates cannot be routed.
+    const stops = orderIds.flatMap((id) => {
+      const p = byId.get(id);
+      return p ? [p] : [];
+    });
+    if (stops.length === 0) return none("None of these stops has coordinates.");
+
+    const truck = truckId
+      ? ((await getTrucks()).find((t) => t.id === truckId) ?? null)
+      : null;
+    const depot: LatLng = { lat: DEPOT.lat, lng: DEPOT.lng };
+
+    const { route, failure } = await routeThrough([depot, ...stops, depot], {
+      vehicle: vehicleForTruck(truck),
+    });
+    if (!route) return none(failure ? ROUTING_MESSAGE[failure] : null);
+
+    const skipped = orderIds.length - stops.length;
+    return {
+      routed: true,
+      distanceMeters: route.distanceMeters,
+      durationSeconds: route.durationSeconds,
+      message:
+        skipped > 0
+          ? `${skipped} stop${skipped === 1 ? " has" : "s have"} no coordinates and ${skipped === 1 ? "is" : "are"} not in this figure.`
+          : null,
+    };
+  } catch (e) {
+    return none(e instanceof Error ? e.message : "Could not route the run.");
   }
 }

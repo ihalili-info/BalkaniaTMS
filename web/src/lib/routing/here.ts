@@ -205,26 +205,89 @@ export async function routeLeg(
     return { leg: null, failure: "no_route" };
   }
 
-  // **Sum the sections — do not read `sections[0]`.** HERE splits a route at
-  // every change of transport, so a sailing comes back as drive / ferry /
-  // drive. Taking the first section would return the run to the port and call
-  // it the journey to Birmingham.
+  const leg = sumSections(sections);
+  return leg ? { leg, failure: null } : { leg: null, failure: "no_route" };
+}
+
+/**
+ * **Sum the sections — do not read `sections[0]`.** HERE splits a route at
+ * every change of transport, so a sailing comes back as drive / ferry / drive.
+ * Taking the first section would return the run to the port and call it the
+ * journey to Birmingham. A route with `via` points is split at each one too.
+ */
+function sumSections(sections: RouteSection[]): RouteLeg | null {
   let distanceMeters = 0;
   let durationSeconds = 0;
   for (const section of sections) {
     const length = section.summary?.length;
     const duration = section.summary?.duration;
-    if (typeof length !== "number" || typeof duration !== "number") {
-      return { leg: null, failure: "no_route" };
-    }
+    if (typeof length !== "number" || typeof duration !== "number") return null;
     distanceMeters += length;
     durationSeconds += duration;
   }
+  return { distanceMeters, durationSeconds: Math.round(durationSeconds) };
+}
 
-  return {
-    leg: { distanceMeters, durationSeconds: Math.round(durationSeconds) },
-    failure: null,
-  };
+/**
+ * HERE's ceiling on `via` points in one request. A run has one waypoint per
+ * intermediate stop; past this, `routeThrough` refuses rather than silently
+ * dropping the tail of the run.
+ */
+export const MAX_VIA_POINTS = 50;
+
+/**
+ * One route through an ordered list of points — depot, each stop in the order
+ * the driver runs them, and back. One request, so one billed transaction,
+ * where summing legs would be one per stop.
+ *
+ * Time-independent (`departureTime=any`): this prices a plan, not a live
+ * position. The figure is **driving only** — no unloading, no tachograph break.
+ */
+export async function routeThrough(
+  points: LatLng[],
+  { vehicle = DEFAULT_FLEET_VEHICLE }: { vehicle?: HereVehicle } = {},
+): Promise<{ route: RouteLeg | null; failure: RoutingFailure | null }> {
+  const key = routingKey();
+  if (!key) return { route: null, failure: "not_configured" };
+  if (points.length < 2 || points.length - 2 > MAX_VIA_POINTS) {
+    return { route: null, failure: "invalid_request" };
+  }
+
+  const params = new URLSearchParams({
+    transportMode: "truck",
+    origin: coord(points[0]),
+    destination: coord(points[points.length - 1]),
+    return: "summary",
+    departureTime: "any",
+    apiKey: key,
+  });
+  // `via` repeats, and the order of the parameters is the order of the run.
+  for (const p of points.slice(1, -1)) params.append("via", coord(p));
+  appendVehicleParams(params, vehicle);
+
+  let response: Response;
+  try {
+    response = await fetch(`${ROUTE_ENDPOINT}?${params}`, { cache: "no-store" });
+  } catch {
+    return { route: null, failure: "network" };
+  }
+  if (!response.ok) {
+    return { route: null, failure: await classifyHttp("v8/routes", response) };
+  }
+
+  let payload: { routes?: { sections?: RouteSection[] }[] };
+  try {
+    payload = await response.json();
+  } catch {
+    return { route: null, failure: "bad_response" };
+  }
+
+  const sections = payload.routes?.[0]?.sections;
+  if (!Array.isArray(sections) || sections.length === 0) {
+    return { route: null, failure: "no_route" };
+  }
+  const route = sumSections(sections);
+  return route ? { route, failure: null } : { route: null, failure: "no_route" };
 }
 
 /* --- matrix (planning) --------------------------------------------------- */
