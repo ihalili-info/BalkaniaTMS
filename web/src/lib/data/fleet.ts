@@ -125,15 +125,31 @@ function toOrder(row: OrderGeoRow): Order {
   };
 }
 
+/** PostgREST silently truncates at its `max-rows` (1000 on Supabase). */
+const ORDERS_PAGE = 1000;
+
 export async function getOrders(): Promise<Order[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("orders_geo")
-    .select("*")
-    .order("created_at", { ascending: false });
+  const rows: OrderGeoRow[] = [];
 
-  if (error) throw new Error(`Could not load orders: ${error.message}`);
-  return (data ?? []).map(toOrder);
+  // Paged, because a bare select stops at 1000 rows without saying so — the
+  // queue's counts and its per-day filter would then quietly leave out every
+  // older order.
+  for (let offset = 0; ; offset += ORDERS_PAGE) {
+    const { data, error } = await supabase
+      .from("orders_geo")
+      .select("*")
+      // `id` breaks ties so a page boundary can neither skip nor repeat a row.
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(offset, offset + ORDERS_PAGE - 1);
+
+    if (error) throw new Error(`Could not load orders: ${error.message}`);
+    rows.push(...(data ?? []));
+    if ((data?.length ?? 0) < ORDERS_PAGE) break;
+  }
+
+  return rows.map(toOrder);
 }
 
 /* --- loads ------------------------------------------------------------------ */

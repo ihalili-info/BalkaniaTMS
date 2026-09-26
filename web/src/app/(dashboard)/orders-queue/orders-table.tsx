@@ -35,6 +35,31 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "delivered", label: "Delivered" },
 ];
 
+/**
+ * The calendar day (YYYY-MM-DD) an order was received, in UTC.
+ *
+ * UTC on purpose: it is the zone `formatDate` / `formatClock` print the
+ * Received column in, so an order never appears under a different day from the
+ * one written on its own row.
+ */
+const receivedDay = (o: Order) => o.created_at.slice(0, 10);
+
+/** `<input type="date">` speaks YYYY-MM-DD; shift a UTC day by whole days. */
+function utcDay(offsetDays = 0): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + offsetDays);
+  return d.toISOString().slice(0, 10);
+}
+
+const DATE_PRESETS: { label: string; range: () => [string, string] }[] = [
+  { label: "Today", range: () => [utcDay(), utcDay()] },
+  { label: "Yesterday", range: () => [utcDay(-1), utcDay(-1)] },
+  { label: "7 days", range: () => [utcDay(-6), utcDay()] },
+];
+
+const dateInputClass =
+  "h-9 rounded-sm border border-hairline bg-surface-muted px-2 text-body-sm text-ink outline-none focus:border-brand-border focus:bg-surface";
+
 export function OrdersTable({
   orders,
   trucks,
@@ -60,25 +85,41 @@ export function OrdersTable({
 }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
+  // Inclusive received-date range, YYYY-MM-DD. Empty = unbounded on that side.
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [deleting, setDeleting] = useState(false);
   const [planning, setPlanning] = useState(false);
 
+  const dated = from !== "" || to !== "";
+
+  // The tab counts follow the date range, so "Delivered 12" means twelve on the
+  // chosen day(s) rather than the queue's lifetime total.
+  const inRange = useMemo(
+    () =>
+      orders.filter((o) => {
+        const day = receivedDay(o);
+        return (from === "" || day >= from) && (to === "" || day <= to);
+      }),
+    [orders, from, to],
+  );
+
   const counts = useMemo(() => {
     const map: Record<Filter, number> = {
-      all: orders.length,
+      all: inRange.length,
       pending: 0,
       assigned: 0,
       en_route: 0,
       delivered: 0,
     };
-    for (const o of orders) map[o.status] += 1;
+    for (const o of inRange) map[o.status] += 1;
     return map;
-  }, [orders]);
+  }, [inRange]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return orders.filter((o) => {
+    return inRange.filter((o) => {
       if (filter !== "all" && o.status !== filter) return false;
       if (!q) return true;
       return (
@@ -89,7 +130,7 @@ export function OrdersTable({
         (o.crm_vehicle ?? "").toLowerCase().includes(q)
       );
     });
-  }, [orders, filter, query]);
+  }, [inRange, filter, query]);
 
   // Only unassigned orders can be put on a new load.
   const selectable = visible.filter((o) => o.status === "pending");
@@ -129,7 +170,61 @@ export function OrdersTable({
           ))}
         </div>
 
-        <label className="ml-auto flex h-9 w-full max-w-xs items-center gap-2 rounded-sm border border-hairline bg-surface-muted px-3 focus-within:border-brand-border focus-within:bg-surface">
+        <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          {DATE_PRESETS.map((p) => {
+            const [pFrom, pTo] = p.range();
+            const active = from === pFrom && to === pTo;
+            return (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => {
+                  setFrom(pFrom);
+                  setTo(pTo);
+                }}
+                aria-pressed={active}
+                className={cx(
+                  "rounded-sm px-2 py-1.5 text-body-sm transition-colors",
+                  active
+                    ? "bg-brand-soft font-medium text-brand-ink"
+                    : "text-ink-muted hover:bg-surface-muted hover:text-ink",
+                )}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+          <input
+            type="date"
+            value={from}
+            max={to || undefined}
+            onChange={(e) => setFrom(e.target.value)}
+            aria-label="Received from"
+            className={dateInputClass}
+          />
+          <span className="text-body-sm text-ink-subtle">to</span>
+          <input
+            type="date"
+            value={to}
+            min={from || undefined}
+            onChange={(e) => setTo(e.target.value)}
+            aria-label="Received to"
+            className={dateInputClass}
+          />
+          {dated ? (
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setFrom("");
+                setTo("");
+              }}
+            >
+              Clear dates
+            </Button>
+          ) : null}
+        </div>
+
+        <label className="flex h-9 w-full max-w-xs items-center gap-2 rounded-sm border border-hairline bg-surface-muted px-3 focus-within:border-brand-border focus-within:bg-surface">
           <Icon name="filter_alt" className="text-[17px] text-ink-subtle" />
           <input
             value={query}
@@ -204,7 +299,7 @@ export function OrdersTable({
         <EmptyState
           icon="inbox"
           title="No orders match"
-          description="Adjust the status filter or clear the search to see the rest of the queue."
+          description="Adjust the status or date filter, or clear the search, to see the rest of the queue."
         />
       ) : (
         <Table>
