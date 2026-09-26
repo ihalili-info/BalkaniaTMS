@@ -87,6 +87,17 @@ export const MODULES: AppModule[] = [
     roles: ALL,
   },
   {
+    // What the CRM sent that the TMS refused, and why — for the dispatcher who
+    // has to get it fixed at the source. The connector's own health (token,
+    // URL, body shape) stays on Integrations, which is admin only.
+    id: "crm-errors",
+    href: "/crm-errors",
+    label: "CRM Errors",
+    icon: "report_problem",
+    group: "Insight",
+    roles: ALL,
+  },
+  {
     // Holds connector configuration and the shape of the credential set.
     // Admin only — this is the restriction the whole role model exists for.
     id: "integration-settings",
