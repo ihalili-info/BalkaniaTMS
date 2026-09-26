@@ -33,6 +33,7 @@ import {
 } from "@/lib/fleet-selectors";
 import { routeActiveLoad, type LoadRouteInfo } from "@/lib/data/mutations";
 import { formatDuration } from "@/lib/driver-hours";
+import { vehicleTypeIcon } from "@/lib/vehicle-types";
 import { truckDuty, unavailabilityReason } from "@/lib/fleet-status";
 import {
   formatClock,
@@ -687,7 +688,11 @@ export function FleetMap({
                           : "bg-brand text-ink-inverse",
                       )}
                     >
-                      <Icon name="local_shipping" filled className="text-[17px]" />
+                      <Icon
+                        name={vehicleTypeIcon(truck.vehicle_type)}
+                        filled
+                        className="text-[17px]"
+                      />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block font-mono text-data-sm font-medium text-ink">

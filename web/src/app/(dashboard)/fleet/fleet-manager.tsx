@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 
 import {
+  Badge,
   Button,
   Card,
   EmptyState,
@@ -21,6 +22,7 @@ import { truckDuty, truckSignal, unavailabilityReason } from "@/lib/fleet-status
 import { formatDateFull } from "@/lib/format";
 import { vehicleBreaches } from "@/lib/regions";
 import { TRUCK_FEATURES, describeFeature } from "@/lib/truck-features";
+import { vehicleTypeIcon, vehicleTypeLabel } from "@/lib/vehicle-types";
 import type { Truck, TruckDuty } from "@/lib/types";
 
 import { TruckEditor } from "./truck-editor";
@@ -130,13 +132,18 @@ function TruckCard({
                 : "bg-surface-sunken text-ink-subtle",
           )}
         >
-          <Icon name="local_shipping" filled className="text-[19px]" />
+          <Icon
+            name={vehicleTypeIcon(truck.vehicle_type)}
+            filled
+            className="text-[19px]"
+          />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <h3 className="font-mono text-heading text-ink">
               {truck.license_plate}
             </h3>
+            <Badge tone="neutral">{vehicleTypeLabel(truck.vehicle_type)}</Badge>
             {truck.label ? (
               <span className="truncate text-body-sm text-ink-muted">
                 {truck.label}
@@ -328,6 +335,7 @@ export function FleetManager({
         t.license_plate.toLowerCase().includes(q) ||
         (t.label ?? "").toLowerCase().includes(q) ||
         (t.make_model ?? "").toLowerCase().includes(q) ||
+        vehicleTypeLabel(t.vehicle_type).toLowerCase().includes(q) ||
         t.gps_device_id.toLowerCase().includes(q)
       );
     });

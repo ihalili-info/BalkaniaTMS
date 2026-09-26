@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { Badge, Button, Icon } from "@/components/ui";
+import type { WhatsAppRouteStatus } from "@/lib/data/messaging";
 import type { Channel } from "@/lib/driver-messaging";
 import type { LoadView } from "@/lib/types";
 
@@ -15,9 +16,11 @@ import { SendRouteDialog } from "./send-route-dialog";
 export function RouteActions({
   load,
   linkShortenerOn,
+  whatsapp,
 }: {
   load: LoadView;
   linkShortenerOn: boolean;
+  whatsapp: WhatsAppRouteStatus;
 }) {
   const [open, setOpen] = useState(false);
   const [sent, setSent] = useState<{ channel: Channel; to: string } | null>(
@@ -51,6 +54,7 @@ export function RouteActions({
         <SendRouteDialog
           load={load}
           linkShortenerOn={linkShortenerOn}
+          whatsapp={whatsapp}
           onClose={() => setOpen(false)}
           onSend={({ channel, to }) => {
             // The dialog itself already called sendDriverRouteMessage and

@@ -327,7 +327,7 @@ export function DriversPanel({
           <EmptyState
             icon="badge"
             title="No drivers yet"
-            description="Add your drivers with their tachograph card numbers. A load cannot show driving time, or send a route by SMS, without one."
+            description="Add your drivers with their tachograph card numbers. A load cannot show driving time, or be sent a route on WhatsApp, without one."
           />
         </Card>
       ) : (

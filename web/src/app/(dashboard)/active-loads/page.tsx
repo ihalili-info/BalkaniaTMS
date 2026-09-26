@@ -51,6 +51,7 @@ import { isPrefetchRequest } from "@/lib/prefetch";
 
 import { geocodingConfigured } from "@/lib/geocoding/here";
 import { shortioConfigured } from "@/lib/messaging/shortio";
+import { getWhatsAppRouteStatus, type WhatsAppRouteStatus } from "@/lib/data/messaging";
 import { hereMapsKey } from "@/lib/maps.server";
 
 import { DispatchActions } from "./dispatch-actions";
@@ -236,6 +237,7 @@ function LoadCard({
   drivers,
   unassignedOrders,
   linkShortenerOn,
+  whatsapp,
 }: {
   load: LoadView;
   now: Date;
@@ -243,6 +245,7 @@ function LoadCard({
   drivers: Driver[];
   unassignedOrders: Order[];
   linkShortenerOn: boolean;
+  whatsapp: WhatsAppRouteStatus;
 }) {
   const { done, total } = loadProgress(load);
   const nextIndex = load.stops.findIndex((s) => s.delivered_at === null);
@@ -292,7 +295,11 @@ function LoadCard({
             </div>
             <Progress value={done} max={total} tone={done === total ? "ok" : "brand"} />
           </div>
-          <RouteActions load={load} linkShortenerOn={linkShortenerOn} />
+          <RouteActions
+            load={load}
+            linkShortenerOn={linkShortenerOn}
+            whatsapp={whatsapp}
+          />
           <LoadMenu
             load={load}
             trucks={trucks}
@@ -412,6 +419,7 @@ export default async function ActiveLoadsPage() {
   const onALoad = new Set(loads.flatMap((l) => l.stops.map((s) => s.order_id)));
   const unassignedOrders = orders.filter((o) => !onALoad.has(o.id));
   const linkShortenerOn = shortioConfigured();
+  const whatsapp = await getWhatsAppRouteStatus();
 
   const stopsRemaining = activeLoads.reduce(
     (n, l) => n + l.stops.filter((s) => s.delivered_at === null).length,
@@ -473,7 +481,7 @@ export default async function ActiveLoadsPage() {
         <StatTile
           label="Alerts sent today"
           value={alertsToday.length}
-          hint="SMS and WhatsApp, via Sent"
+          hint="WhatsApp"
           icon="forum"
           tone="ok"
         />
@@ -558,6 +566,7 @@ export default async function ActiveLoadsPage() {
               drivers={drivers}
               unassignedOrders={unassignedOrders}
               linkShortenerOn={linkShortenerOn}
+              whatsapp={whatsapp}
             />
           ))}
 
@@ -580,6 +589,7 @@ export default async function ActiveLoadsPage() {
                     drivers={drivers}
                     unassignedOrders={unassignedOrders}
                     linkShortenerOn={linkShortenerOn}
+                    whatsapp={whatsapp}
                   />
                 ))}
               </div>

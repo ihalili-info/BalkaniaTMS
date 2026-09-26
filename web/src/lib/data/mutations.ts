@@ -36,6 +36,7 @@ import { DEFAULT_FLEET_VEHICLE, vehicleForTruck } from "@/lib/routing/vehicle";
 import { getTrucks } from "@/lib/data/fleet";
 import { coordKey } from "@/lib/format";
 import { DEPOT } from "@/lib/geo/reference";
+import { isVehicleType } from "@/lib/vehicle-types";
 import { settleStopDelivered, syncLoadCompletion } from "@/lib/data/stop-delivery";
 import { mutateInChunks, selectInChunks } from "@/lib/data/in-chunks";
 
@@ -82,6 +83,7 @@ const TRUCK_FIELDS = [
   "make_model",
   "gps_device_id",
   "gps_esn",
+  "vehicle_type",
   "capacity_kg",
   "capacity_m3",
   "pallet_slots",
@@ -110,6 +112,10 @@ export async function updateTruck(
     const update: Record<string, unknown> = {};
     for (const key of TRUCK_FIELDS) {
       if (key in patch) update[key] = patch[key];
+    }
+    // The CHECK would reject it too, but with a constraint name for a message.
+    if ("vehicle_type" in update && !isVehicleType(update.vehicle_type)) {
+      return { ok: false, message: "Vehicle type must be truck or van." };
     }
     if (Object.keys(update).length === 0) {
       return { ok: true, message: null };

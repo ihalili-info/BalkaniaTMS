@@ -50,6 +50,8 @@ export async function getTrucks(): Promise<Truck[]> {
     license_plate: row.license_plate,
     gps_device_id: row.gps_device_id,
     gps_esn: row.gps_esn ?? null,
+    // Anything unrecognised is an HGV — the fleet was modelled as one until 0022.
+    vehicle_type: row.vehicle_type === "van" ? "van" : "truck",
     current_location: point(row),
     location_updated_at: row.location_updated_at,
     label: row.label,

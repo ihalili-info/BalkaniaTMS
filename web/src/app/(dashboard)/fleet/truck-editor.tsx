@@ -17,7 +17,8 @@ import {
   describeFeature,
   toFeatureId,
 } from "@/lib/truck-features";
-import type { Truck, TruckAvailability } from "@/lib/types";
+import { VEHICLE_TYPES } from "@/lib/vehicle-types";
+import type { Truck, TruckAvailability, VehicleType } from "@/lib/types";
 
 const AVAILABILITY_OPTIONS: {
   value: TruckAvailability;
@@ -59,6 +60,7 @@ export function TruckEditor({
   onClose: () => void;
   now: Date;
 }) {
+  const [vehicleType, setVehicleType] = useState<VehicleType>(truck.vehicle_type);
   const [label, setLabel] = useState(truck.label ?? "");
   const [makeModel, setMakeModel] = useState(truck.make_model ?? "");
   const [gpsDeviceId, setGpsDeviceId] = useState(truck.gps_device_id);
@@ -119,6 +121,7 @@ export function TruckEditor({
   const save = () => {
     const isAvailable = availability === "available";
     onSave({
+      vehicle_type: vehicleType,
       label: toNullableText(label),
       make_model: toNullableText(makeModel),
       gps_device_id: gpsDeviceId.trim(),
@@ -178,6 +181,37 @@ export function TruckEditor({
 
         <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5">
           <section className="space-y-3">
+            <Field
+              label="Vehicle type"
+              htmlFor="vehicle-type"
+              hint={VEHICLE_TYPES.find((t) => t.value === vehicleType)?.hint}
+            >
+              <div
+                id="vehicle-type"
+                role="radiogroup"
+                aria-label="Vehicle type"
+                className="grid grid-cols-2 gap-2"
+              >
+                {VEHICLE_TYPES.map((t) => (
+                  <button
+                    key={t.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={vehicleType === t.value}
+                    onClick={() => setVehicleType(t.value)}
+                    className={cx(
+                      "flex items-center justify-center gap-2 rounded-sm border px-3 py-2 text-body-sm transition-colors",
+                      vehicleType === t.value
+                        ? "border-brand-border bg-brand-soft font-medium text-brand-ink"
+                        : "border-hairline text-ink-muted hover:bg-surface-muted hover:text-ink",
+                    )}
+                  >
+                    <Icon name={t.icon} className="text-[18px]" />
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </Field>
             <Field label="Name" htmlFor="label" hint="How dispatchers refer to it">
               <input
                 id="label"

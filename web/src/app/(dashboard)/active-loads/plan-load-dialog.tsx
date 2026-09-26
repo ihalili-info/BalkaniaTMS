@@ -116,6 +116,9 @@ export function PlanLoadDialog({
   }, [stops]);
 
   const runFresh = run?.key === runKey ? run.result : null;
+  // Reg. 561/2006 is written for goods vehicles over 3.5 t; a van is not held to
+  // it, so the daily-limit warning below is for trucks only.
+  const euHours = truck?.vehicle_type !== "van";
   const runLoading = picked.length > 0 && runFresh === null;
 
   const destinations = [...new Set(stops.map((s) => s.delivery_country))];
@@ -335,7 +338,8 @@ export function PlanLoadDialog({
                   <RunFigure label="Stops" value={String(picked.length)} />
                 </dl>
               </div>
-              {runFresh?.routed &&
+              {euHours &&
+              runFresh?.routed &&
               runFresh.durationSeconds! > DAILY_DRIVING_LIMIT_S ? (
                 <p className="mb-2 flex items-start gap-2 rounded-sm border border-warn-border bg-warn-soft px-3 py-2 text-caption text-ink-muted">
                   <Icon name="schedule" className="mt-px text-[15px] text-warn" />
@@ -343,7 +347,8 @@ export function PlanLoadDialog({
                   the 9 h daily limit (Reg. 561/2006; 10 h at most twice a
                   week) — this run needs a rest day or a second driver.
                 </p>
-              ) : runFresh?.routed &&
+              ) : euHours &&
+                runFresh?.routed &&
                 runFresh.durationSeconds! > CONTINUOUS_DRIVING_LIMIT_S ? (
                 <p className="mb-2 text-caption text-ink-subtle">
                   Over 4 h 30 of driving — the driver must take a 45 min break

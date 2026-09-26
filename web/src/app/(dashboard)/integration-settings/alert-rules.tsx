@@ -52,16 +52,6 @@ export function AlertRules() {
     proximity_alert: true,
     delivery_complete: true,
   });
-  /**
-   * "auto" omits `channel` on the Sent API, which is what enables its
-   * cross-channel fallback — one message, one charge. Pinning a channel is
-   * supported; picking several would broadcast, sending (and billing) the same
-   * alert once per channel. That is not an option offered here on purpose.
-   */
-  const [channel, setChannel] = useState<"auto" | "sms" | "whatsapp" | "rcs">(
-    "auto",
-  );
-
   return (
     <div className="grid gap-4 xl:grid-cols-2">
       <Card>
@@ -116,43 +106,18 @@ export function AlertRules() {
             <p className="mb-2 font-mono text-label uppercase text-ink-subtle">
               Delivery channel
             </p>
-            <div className="flex gap-1 rounded-sm border border-hairline bg-surface-muted p-1">
-              {(["auto", "sms", "whatsapp", "rcs"] as const).map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setChannel(c)}
-                  aria-pressed={channel === c}
-                  className={cx(
-                    "flex-1 rounded-xs px-3 py-1.5 text-body-sm transition-colors",
-                    channel === c
-                      ? "bg-surface font-medium text-ink shadow-card"
-                      : "text-ink-muted hover:text-ink",
-                  )}
-                >
-                  {c === "auto"
-                    ? "Auto"
-                    : c === "sms"
-                      ? "SMS"
-                      : c === "whatsapp"
-                        ? "WhatsApp"
-                        : "RCS"}
-                </button>
-              ))}
-            </div>
-            <p className="mt-2 text-caption text-ink-subtle">
-              {channel === "auto"
-                ? "Sent picks the channel and falls back if it fails — one message per alert."
-                : `Pinned to ${channel.toUpperCase()}. No fallback: if it fails, the customer is not told.`}
+            <p className="flex items-center gap-2 rounded-sm border border-hairline bg-surface-muted px-3 py-2 text-body-sm text-ink">
+              <Icon name="chat" className="text-[17px] text-ok" />
+              WhatsApp
+              <Badge tone="neutral" className="ml-auto">
+                Only channel
+              </Badge>
             </p>
-            <p className="mt-2 flex items-start gap-1.5 rounded-sm border border-hairline bg-surface-muted px-2.5 py-2 text-caption text-ink-muted">
-              <Icon name="payments" className="mt-px text-[15px] text-ink-subtle" />
-              <span>
-                There is deliberately no &ldquo;all channels&rdquo; option.
-                On Sent, naming several channels broadcasts rather than falls
-                back — the customer gets the same alert once per channel, and
-                each one is billed.
-              </span>
+            <p className="mt-2 text-caption text-ink-subtle">
+              Every message goes out on WhatsApp, as an approved template
+              &mdash; a business can only start a conversation that way. There
+              is no SMS or RCS fallback: if a send fails, the customer is not
+              told.
             </p>
           </div>
         </CardBody>
@@ -204,7 +169,7 @@ export function AlertRules() {
           <Icon name="lock" className="mt-px text-[15px]" />
           <span>
             These three are the <strong>only</strong> messages a customer ever
-            receives. There is no dispatcher-initiated customer SMS. Navigation
+            receives. There is no dispatcher-initiated customer message. Navigation
             links sent from Active Loads go to the driver, are recorded in{" "}
             <code className="font-mono">driver_messages</code>, and never reach
             a customer.

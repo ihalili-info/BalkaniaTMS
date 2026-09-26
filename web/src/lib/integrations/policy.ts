@@ -57,9 +57,9 @@ export const privacySettings: PrivacySetting[] = [
   {
     id: "processors",
     label: "Processors",
-    value: "Sent (sent.dm), Supabase, Vercel",
+    value: "Meta (WhatsApp Business), Supabase, Vercel",
     basis:
-      "Each needs a data processing agreement. Check the transfer mechanism for any processing outside the EEA.",
+      "Each needs a data processing agreement. Meta processes the recipient's number and the message content; check the transfer mechanism for any processing outside the EEA.",
     icon: "handshake",
   },
   {

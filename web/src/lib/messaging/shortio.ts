@@ -1,15 +1,15 @@
 import "server-only";
 
 /**
- * Short.io — shortens the navigation URL before it goes out in a driver SMS.
+ * Short.io — shortens the navigation URL before it goes out in a driver
+ * WhatsApp message.
  *
  * **Why this exists.** A multi-stop Google Maps directions URL runs to roughly
- * 500 characters, which pushes the route SMS to four or more segments. A long
- * concatenated SMS is reassembled by the receiving handset from parts that are
- * delivered separately, and when one part is dropped or reordered the driver is
- * left with a truncated, dead link — the exact failure this replaces. A
- * ~25-character short link keeps the whole message inside one or two segments
- * and the link intact.
+ * 500 characters. It began as a fix for SMS, where a long message is split into
+ * parts that the handset reassembles and a dropped part leaves a dead link;
+ * WhatsApp has no such split, but a 500-character URL is still an unreadable
+ * wall in a chat bubble. So it stays, as a readability measure rather than a
+ * delivery one.
  *
  * **Best-effort, never on the critical path.** No key, an unknown domain, a
  * rate limit, or a slow response all fall back to sending the full URL: a long
@@ -26,10 +26,7 @@ const API_BASE = "https://api.short.io";
 
 /**
  * Only skip shortening for something that is not a real link. Every navigation
- * URL — even a single-destination one at ~90 characters — is worth shortening:
- * once the wrapper text ("Dear Driver…", the sign-off) is added, even that
- * tips the SMS into a second segment, and a two-part SMS can still arrive with
- * a part missing.
+ * URL, even a single-destination one at ~90 characters, is tidier short.
  */
 const MIN_LENGTH_TO_SHORTEN = 30;
 

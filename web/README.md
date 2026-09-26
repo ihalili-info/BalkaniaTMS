@@ -34,7 +34,7 @@ src/
     types.ts                row types mirroring supabase/migrations/
     auth/                   roles + module registry, session, page guard
     navigation-links.ts     Waze / Google / Apple deep links + HGV caveats
-    driver-messaging.ts     driver SMS composition, GSM-7 segment counting
+    driver-messaging.ts     driver WhatsApp message composition
     csv.ts                  RFC 4180 CSV reader/writer
     orders-import.ts        CSV column schema, auto-mapping, row validation
     regions.ts              country registry — limits, postcodes, customs regimes
@@ -89,14 +89,16 @@ src/
 
 ## Sending a driver their route
 
-From Active Loads, "Send route" composes an SMS or WhatsApp with navigation
-deep links. Google Maps takes the whole remaining route; Waze and Apple Maps
+From Active Loads, "Send route" sends the driver a WhatsApp message with
+navigation deep links (WhatsApp is the only channel — set the Meta credentials
+and an approved route template in Integrations, or the send is refused or
+limited to drivers who wrote to your number in the last 24 hours). Google Maps takes the whole remaining route; Waze and Apple Maps
 take the next stop only, and each link says which. A warning fires when the
 vehicle is too tall, too heavy or carrying ADR for a consumer navigator to route
 safely.
 
 **Drivers only.** Customers receive only the three automated alerts in
-`notifications` — there is no dispatcher-initiated customer SMS. Keep it that
+`notifications` — there is no dispatcher-initiated customer message. Keep it that
 way unless there is a decision to the contrary.
 
 ## Importing orders
@@ -167,7 +169,7 @@ saying:
 
 Then add the `.env.example` variables as Vercel Environment Variables. Only the
 `NEXT_PUBLIC_*` pair is exposed to the browser; keep
-`SUPABASE_SERVICE_ROLE_KEY`, the Sent credentials and the webhook secrets
+`SUPABASE_SERVICE_ROLE_KEY`, the WhatsApp token and the webhook secrets
 server-only.
 
 Note that **Routing Middleware — our `proxy.ts` — is deployed to all regions

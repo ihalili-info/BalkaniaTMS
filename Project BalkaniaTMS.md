@@ -1,7 +1,7 @@
 # Balkania TMS — System Architecture
 
 ## Project Overview
-**Balkania TMS** is an Ireland-based automated logistics, route tracking, and customer notification platform. The system synchronizes order data from an existing CRM, tracks vehicle positions via telematics APIs, manages load assignments, and sends automated proximity alerts to customers via SMS and WhatsApp.
+**Balkania TMS** is an Ireland-based automated logistics, route tracking, and customer notification platform. The system synchronizes order data from an existing CRM, tracks vehicle positions via telematics APIs, manages load assignments, and sends automated proximity alerts to customers via WhatsApp.
 
 ---
 
@@ -17,7 +17,7 @@
 | **Geocoding** | **HERE Geocoding & Search** (`HERE_API_KEY`) | Converts CRM delivery addresses into `GEOGRAPHY(Point, 4326)` coordinates during order ingestion. For Irish orders a well-formed Eircode is queried on its own first — it is a building, not a district, and HERE supports postal-code-only lookup for Ireland. Matches coarser than a street are refused, not stored. |
 | **Routing & ETA** | **HERE Routing v8** (`HERE_API_KEY`, same key as Geocoding) | Road distance/time for auto-plan sequencing (`/v8/matrix`, traffic-unaware) and live truck → next-stop ETA (`/v8/routes`, traffic-aware). **HGV routing** — `transportMode=truck` with gross weight, height, length and ADR class, so a route respects the 4.0 m bridge and the weight limit. The live ETA uses the assigned truck; auto-plan runs before assignment and uses a fleet default. Every consumer falls back to great-circle distance when unconfigured or on failure. |
 | **Basemap** | **HERE Maps API for JavaScript** (`NEXT_PUBLIC_HERE_MAPS_API_KEY`) | Road basemap under the Live Fleet Map and the auto-plan review. A **separate, domain-restricted** key from `HERE_API_KEY`: it authenticates in the browser and cannot be proxied, so it must not be one that also authorises billable geocoding and routing. Unset → both fall back to the schematic SVG projection, still drawn to true scale. |
-| **Communications** | **Sent** (sent.dm) | Unified SMS/WhatsApp/RCS API for triggered dispatch and proximity alerts. `POST /v3/messages`, `x-api-key` auth. Leave `channel` unset so Sent falls back across channels — naming several broadcasts and bills per channel. |
+| **Communications** | **WhatsApp** (Meta Cloud API) | The only messaging channel, called directly — no gateway. `POST graph.facebook.com/<ver>/<phone-number-id>/messages`, Bearer token. A business opens a conversation only with an approved template; free text works only inside 24 h of the recipient writing in. |
 | **Telematics / GPS** | **Verizon Connect Reveal** (formerly Fleetmatics) | EU tenant `fim.eu.fleetmatics.com`. GPS webhook push into `/api/webhooks/gps` (Basic auth we set). RAD REST pull is fallback only — no fleet-wide endpoint, and Verizon caps polling at one call per vehicle every 3–5 minutes. |
 | **Tachograph** | **Smart tachograph API** | Reg. (EU) 165/2014. Driver cards and duty time, feeding the Reg. 561/2006 counters on `drivers`. Deliberately separate from the GPS feed — position is not duty. |
 | **Customs** | **Declaration provider** *(not chosen)* | Export/import declarations for GB movements and Windsor Framework lanes for Northern Ireland. |
@@ -36,7 +36,7 @@
                                                   (Geofence Calculation)
                                                              |
                                                              v
-[ Sent API ] <--- ( Supabase Webhook / Edge Function ) ------+---> [ WhatsApp / SMS Alert ]
+[ WhatsApp Cloud API ] <--- ( Supabase Webhook / Edge Function ) ------+---> [ WhatsApp Alert ]
 ```
 
 ---
@@ -64,8 +64,8 @@
 * **Not equivalent:** only Google Maps accepts a multi-stop URL (nine waypoints). Waze and Apple Maps take a single destination and therefore receive the *next* stop, not the last. Each link states its coverage.
 * **Consumer navigators, not HGV routing:** none applies height, weight or ADR restrictions. A 4.62 m Irish trailer is legal at home and over the 4.00 m limit across most of the continent, so the warning is shown at the point of handoff. Note the asymmetry: the *planner* and the *live ETA* are HGV-aware since the move to HERE, but the link handed to the driver is not, and the warning must stay.
 
-### 4. Automated Client Alerts (Sent)
-* **Scope — customer messaging is closed:** the three types below are the *only* messages a customer receives. There is no dispatcher-initiated customer SMS and no public tracking link; both would create a new exposure of a customer's address for no operational gain. Driver messaging is a separate table and a separate channel.
+### 4. Automated Client Alerts (WhatsApp)
+* **Scope — customer messaging is closed:** the three types below are the *only* messages a customer receives. There is no dispatcher-initiated customer message and no public tracking link; both would create a new exposure of a customer's address for no operational gain. Driver messaging is a separate table and a separate channel.
 * **Trigger Conditions (v1):** Fires when a truck is within $5\text{ km}$ of the destination stop (straight-line PostGIS distance). Time-based triggering ($\le 15\text{ minutes}$ ETA) requires a routing/ETA API and is a v2 consideration — straight-line distance is not a reliable proxy for drive time.
 * **Notification Types** (logged individually in the `notifications` table so each can fire independently per order):
   * **Dispatch Confirmation:** *"Your order #1234 has been loaded and is on the way."*
@@ -353,7 +353,7 @@ WHERE l.status = 'active'
 
 1. **Setup Core Stack:** Provision Vercel project and Supabase instance (enable PostGIS, apply migrations 0001–0004, obtain a HERE API key).
 2. **Admin Panel UI:** Built — Active Loads, Orders Queue, Live Fleet Map, Analytics and Integration Settings all render against demo fixtures. Still to design: the Login screen, and a real basemap for the fleet map.
-3. **Claude Coding Workflows:** Use Claude to build Next.js API routes, Supabase client integrations, and Sent webhooks.
+3. **Claude Coding Workflows:** Use Claude to build Next.js API routes, Supabase client integrations, and WhatsApp webhooks.
 4. **GPS Integration & Testing:** Connect vehicle GPS API feed to verify spatial distance triggers and messaging routines.
 5. **Tachograph Integration:** Connect a smart tachograph feed so the Reg. 561/2006 counters on `drivers` are real rather than fixtures. **Reveal cannot supply this** — its API offers `PUT Hours of Use` but no way to read tachograph duty, so this needs a separate provider.
 6. **Sign-in:** Build the login screen and swap `getCurrentUser()` in `web/src/lib/auth/session.ts` for the real Supabase session. Everything downstream is already role-aware.

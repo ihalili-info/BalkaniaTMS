@@ -11,7 +11,7 @@ import {
 /**
  * Was a plain, unwired `<Button>` — looked like a test, did nothing. Now it
  * actually calls `testConnections()`, which only checks providers with a free
- * connection test (today, just Sent's `GET /v3/me`).
+ * connection test (WhatsApp's phone-number read, Short.io, geocoding, routing).
  */
 export function TestConnectionsButton() {
   const [results, setResults] = useState<ConnectionTestResult[] | null>(null);

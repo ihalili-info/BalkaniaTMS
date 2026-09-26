@@ -94,6 +94,21 @@ export const DEFAULT_FLEET_VEHICLE: HereVehicle = {
 };
 
 /**
+ * The dimensions used for a van that has none recorded: a long-wheelbase,
+ * high-roof panel van (Transit / Sprinter class) at the 3.5 t class limit.
+ *
+ * Still routed as `transportMode=truck` — HERE has no van mode, and truck mode
+ * with van-sized dimensions is what keeps a high-roof van off a 2.5 m bridge
+ * that `car` mode would happily send it under. At 3.5 t the HGV weight
+ * restrictions do not apply, so this routes like a car where it can.
+ */
+export const DEFAULT_VAN_VEHICLE: HereVehicle = {
+  grossWeight: 3500,
+  height: 280,
+  length: 600,
+};
+
+/**
  * A `Truck` row as HERE vehicle parameters.
  *
  * `capacity_kg` is deliberately not used — it is payload, and HERE wants the
@@ -108,11 +123,14 @@ export function vehicleForTruck(truck: Truck | null): HereVehicle {
   if (!truck) return DEFAULT_FLEET_VEHICLE;
 
   const hazards = hazardousGoodsFor(truck.adr_classes ?? []);
+  // Whatever the row leaves blank falls back to the defaults for its *type*,
+  // so an unmeasured van is not routed as a 44 t artic.
+  const base = truck.vehicle_type === "van" ? DEFAULT_VAN_VEHICLE : DEFAULT_FLEET_VEHICLE;
 
   return {
-    grossWeight: truck.gross_weight_kg ?? DEFAULT_FLEET_VEHICLE.grossWeight,
-    height: cm(truck.height_m) ?? DEFAULT_FLEET_VEHICLE.height,
-    length: cm(truck.length_m) ?? DEFAULT_FLEET_VEHICLE.length,
+    grossWeight: truck.gross_weight_kg ?? base.grossWeight,
+    height: cm(truck.height_m) ?? base.height,
+    length: cm(truck.length_m) ?? base.length,
     ...(hazards.length > 0 ? { shippedHazardousGoods: hazards } : {}),
   };
 }

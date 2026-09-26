@@ -1,5 +1,5 @@
 /**
- * Composing the SMS a dispatcher sends a driver.
+ * Composing the WhatsApp message a dispatcher sends a driver.
  *
  * Drivers only. Customers receive nothing from this path — their whole
  * messaging surface is the three automated types in `notifications`. See the
@@ -9,14 +9,18 @@
 import { NAV_TARGETS, stopsCovered, type NavApp } from "./navigation-links";
 import type { Driver, LoadView, Stop } from "./types";
 
-/** Matches the driver_messages CHECK; RCS added in migration 0007. */
-export type Channel = "sms" | "whatsapp" | "rcs";
+/**
+ * The only channel the app sends on. WhatsApp is the sole messaging channel;
+ * migration 0023 stops the table accepting anything else.
+ */
+export type Channel = "whatsapp";
 
 export interface DriverMessage {
   id: string;
   load_id: string;
   driver_id: string | null;
-  channel: Channel;
+  /** `sms` / `rcs` appear only on rows sent before WhatsApp became the sole channel. */
+  channel: Channel | "sms" | "rcs";
   to_phone: string;
   body: string;
   kind: "route_link" | "custom";
@@ -44,8 +48,6 @@ export function routeMessage({
   urls: Partial<Record<NavApp, string | null>>;
 }): string {
   const lines: string[] = [
-    // Plain hyphen, not an em dash: a single non-GSM-7 character flips the
-    // whole message to UCS-2 and cuts the segment budget from 153 to 67.
     `Balkania ${load.reference} - ${remaining.length} stop${remaining.length === 1 ? "" : "s"} left.`,
   ];
 
@@ -82,42 +84,6 @@ export function routeMessage({
   }
 
   return lines.join("\n");
-}
-
-/**
- * GSM-7 vs UCS-2 segment count.
- *
- * Worth showing: a single accented character — `Pádraig`, `Dún Laoghaire`,
- * `Düsseldorf` — switches the whole message to UCS-2 and cuts the per-segment
- * budget from 153 to 67, which can triple the cost of a route send.
- */
-const GSM7 =
-  /^[@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !"#¤%&'()*+,\-./0-9:;<=>?¡A-ZÄÖÑÜ§¿a-zäöñüà^{}\\[~\]|€]*$/;
-
-export function smsSegments(body: string): {
-  characters: number;
-  segments: number;
-  unicode: boolean;
-} {
-  const unicode = !GSM7.test(body);
-  const characters = [...body].length;
-  const single = unicode ? 70 : 160;
-  const multi = unicode ? 67 : 153;
-  return {
-    characters,
-    segments: characters === 0 ? 0 : characters <= single ? 1 : Math.ceil(characters / multi),
-    unicode,
-  };
-}
-
-/** Strips accents so a message fits GSM-7, when the dispatcher opts to. */
-export function toGsm7(body: string): string {
-  return body
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[’‘]/g, "'")
-    .replace(/[“”]/g, '"')
-    .replace(/[–—]/g, "-");
 }
 
 export function driverPhone(driver: Driver | null): string | null {

@@ -157,28 +157,27 @@ export const CONNECTORS: Connector[] = [
     ],
   },
   {
-    id: "sent",
-    name: "Sent (sent.dm)",
+    id: "whatsapp",
+    name: "WhatsApp (Meta Cloud API)",
     purpose:
-      "Customer alerts over SMS, WhatsApp and RCS through one API, with provider-side channel fallback.",
-    icon: "sms",
+      "Every message the app sends — driver routes today, customer alerts once they are built — over WhatsApp Business directly. WhatsApp is the only channel.",
+    icon: "chat",
     status: "not_configured",
-    envVars: ["SENT_DM_API_KEY"],
-    secrets: ["SENT_DM_API_KEY"],
-    endpoint: "POST https://api.sent.dm/v3/messages",
-    note: "Header-key auth only — `x-api-key: <SENT_DM_API_KEY>`, no sender-profile header and nothing else. Delivery-status receipts are not consumed, so there is no webhook secret.",
+    envVars: [
+      "WHATSAPP_ACCESS_TOKEN",
+      "WHATSAPP_PHONE_NUMBER_ID",
+      "WHATSAPP_API_VERSION",
+    ],
+    secrets: ["WHATSAPP_ACCESS_TOKEN"],
+    endpoint: "POST https://graph.facebook.com/<version>/<phone-number-id>/messages",
+    note: "Bearer auth with a permanent system-user token — a temporary token from the API setup page expires in 24 hours. WHATSAPP_PHONE_NUMBER_ID is the id of the sending number in WhatsApp Manager, not the phone number itself; WHATSAPP_API_VERSION is optional (defaults to v22.0). A business can only START a conversation with an approved template — free-form text is delivered only within 24 hours of the recipient writing to the number. So the driver route needs a template: create one in WhatsApp Manager (category Utility) with a single body variable, e.g. \"Balkania route: {{1}}\", wait for approval, and enter its name below. Delivery receipts are not consumed, so there is no webhook secret.",
     fields: [
       {
-        key: "default_channel",
-        label: "Delivery channel",
-        kind: "select",
-        help: "Auto omits `channel`, which is what enables cross-channel fallback — one message, one charge. Pinning removes the fallback.",
-        options: [
-          { value: "auto", label: "Auto — Sent picks, with fallback" },
-          { value: "sms", label: "SMS only" },
-          { value: "whatsapp", label: "WhatsApp only" },
-          { value: "rcs", label: "RCS only" },
-        ],
+        key: "template_language",
+        label: "Template language",
+        kind: "text",
+        help: "The language code the templates below were approved in — `en`, `en_GB`, … It must match exactly, or Meta answers that the template does not exist.",
+        placeholder: "en",
       },
       {
         key: "retention_days",
@@ -193,29 +192,29 @@ export const CONNECTORS: Connector[] = [
         key: "template_route_link",
         label: "Driver route template",
         kind: "text",
-        help: "Sent template id. Takes one variable, `routeURL` — the single navigation link sent to the driver.",
-        placeholder: "c7f9c11f-baad-45f0-b30f-16a3c6005528",
+        help: "Approved template NAME (not an id). Takes one body variable, {{1}} — the navigation link sent to the driver. Leave empty to send free-form text instead, which only reaches a driver who has messaged this number in the last 24 hours.",
+        placeholder: "driver_route",
       },
       {
         key: "template_dispatch_confirmation",
         label: "Dispatch confirmation template",
         kind: "text",
-        help: "Sent when a load's stop moves to en route — \"loaded and on its way\".",
-        placeholder: "fb169e73-5313-43d8-aef5-6dc41ed7bf37",
+        help: "Approved template name, for when a load's stop moves to en route — \"loaded and on its way\". Not used yet: the customer alert engine is unbuilt.",
+        placeholder: "dispatch_confirmation",
       },
       {
         key: "template_proximity",
         label: "Proximity alert template",
         kind: "text",
-        help: "Sent when the truck enters the 5 km geofence around a stop.",
-        placeholder: "41767c8f-db37-4155-b39b-0dab9f467bd9",
+        help: "Approved template name, for when the truck enters the 5 km geofence around a stop. Not used yet.",
+        placeholder: "proximity_alert",
       },
       {
         key: "template_delivery_complete",
         label: "Delivery complete template",
         kind: "text",
-        help: "Sent once a stop's delivered_at is set.",
-        placeholder: "8c42ada4-eceb-45bb-8a80-0d2672aaa2e1",
+        help: "Approved template name, for once a stop's delivered_at is set. Not used yet.",
+        placeholder: "delivery_complete",
       },
     ],
   },
@@ -223,13 +222,13 @@ export const CONNECTORS: Connector[] = [
     id: "shortio",
     name: "Short.io link shortener",
     purpose:
-      "Shortens the navigation URL in a driver route SMS. A multi-stop Google Maps link is ~500 characters and fragments the message — a dropped fragment leaves the driver with a dead link. Optional: without it the full URL is sent.",
+      "Shortens the navigation URL in a driver route message. A multi-stop Google Maps link is ~500 characters — unreadable in a chat bubble and awkward to tap. Optional: without it the full URL is sent.",
     icon: "link",
     status: "not_configured",
     envVars: ["SHORTIO_API_KEY", "SHORTIO_DOMAIN"],
     secrets: ["SHORTIO_API_KEY"],
     endpoint: "POST https://api.short.io/links",
-    note: "Auth is the raw API key in the `Authorization` header (not Bearer). `SHORTIO_DOMAIN` is the short domain links are created under — a custom domain or the plan's `*.short.gy` subdomain — and must already exist in the account. Every route link is shortened; re-shortening a URL already in the account returns the existing link without spending quota, so resends are free. Run Test connections after setting it — the driver SMS still carrying the long URL means one of the two values is wrong.",
+    note: "Auth is the raw API key in the `Authorization` header (not Bearer). `SHORTIO_DOMAIN` is the short domain links are created under — a custom domain or the plan's `*.short.gy` subdomain — and must already exist in the account. Every route link is shortened; re-shortening a URL already in the account returns the existing link without spending quota, so resends are free. Run Test connections after setting it — the driver message still carrying the long URL means one of the two values is wrong.",
     fields: [],
   },
   {
@@ -357,16 +356,17 @@ export const DEFAULT_CONFIG: Record<string, Record<string, string | number | boo
     push_enabled: true,
   },
   geotab: { server: "", database: "" },
-  sent: {
-    default_channel: "auto",
+  whatsapp: {
+    template_language: "en",
     retention_days: 90,
-    // Seeded with the templates already created in the Sent dashboard, so the
-    // integration works before anyone opens this card — override here if a
-    // template gets recreated with a new id.
-    template_route_link: "c7f9c11f-baad-45f0-b30f-16a3c6005528",
-    template_dispatch_confirmation: "fb169e73-5313-43d8-aef5-6dc41ed7bf37",
-    template_proximity: "41767c8f-db37-4155-b39b-0dab9f467bd9",
-    template_delivery_complete: "8c42ada4-eceb-45bb-8a80-0d2672aaa2e1",
+    // Empty on purpose. Template names are chosen in WhatsApp Manager and only
+    // work once Meta has approved them, so there is nothing sensible to seed —
+    // and an unset route template says so in the Send route dialog rather than
+    // failing later with "template does not exist".
+    template_route_link: "",
+    template_dispatch_confirmation: "",
+    template_proximity: "",
+    template_delivery_complete: "",
   },
   crm: { enabled: false },
   shortio: {},

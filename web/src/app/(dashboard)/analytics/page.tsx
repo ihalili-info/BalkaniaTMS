@@ -123,7 +123,7 @@ export default async function AnalyticsPage() {
             <StatTile
               label="Alerts sent"
               value={a.alertsSent}
-              hint="SMS, WhatsApp and RCS via Sent"
+              hint="WhatsApp"
               icon="forum"
             />
             <StatTile
@@ -184,7 +184,7 @@ export default async function AnalyticsPage() {
             <Card>
               <CardHeader
                 title="Alerts by type"
-                hint="sent.dm sends, last 14 days"
+                hint="WhatsApp sends, last 14 days"
               />
               <CardBody>
                 {alertCategories.length > 0 ? (

@@ -4,13 +4,11 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 
 import { Badge, Button, Icon, cx } from "@/components/ui";
 import { relativeTime } from "@/lib/format";
-import { sendDriverRouteMessage } from "@/lib/data/messaging";
 import {
-  routeMessage,
-  smsSegments,
-  toGsm7,
-  type Channel,
-} from "@/lib/driver-messaging";
+  sendDriverRouteMessage,
+  type WhatsAppRouteStatus,
+} from "@/lib/data/messaging";
+import { routeMessage, type Channel } from "@/lib/driver-messaging";
 import {
   NAV_TARGETS,
   navigationUrl,
@@ -25,17 +23,18 @@ const APPS: NavApp[] = ["google", "waze", "apple"];
 export function SendRouteDialog({
   load,
   linkShortenerOn,
+  whatsapp,
   onSend,
   onClose,
 }: {
   load: LoadView;
   linkShortenerOn: boolean;
+  /** How the message will actually go out — see `getWhatsAppRouteStatus`. */
+  whatsapp: WhatsAppRouteStatus;
   onSend: (summary: { channel: Channel; to: string }) => void;
   onClose: () => void;
 }) {
   const [selected, setSelected] = useState<NavApp[]>(["google", "waze"]);
-  const [channel, setChannel] = useState<Channel>("sms");
-  const [forceGsm, setForceGsm] = useState(false);
   // The route the driver opens starts from wherever their phone is — that is
   // what "start my navigation" should mean. The truck's last GPS fix is offered
   // as an override, but it can be badly stale (the push feed may be down), so
@@ -84,20 +83,24 @@ export function SendRouteDialog({
       routeMessage({ load, remaining, apps: selected, urls }),
     [load, remaining, selected, urls],
   );
-  const body = forceGsm ? toGsm7(rawBody) : rawBody;
-  const meta = smsSegments(body);
+  const body = rawBody;
 
   const phone = load.driver?.phone ?? null;
   const warning = truckRoutingWarning(load.truck, load.destination_countries);
 
-  // Sent's driver-route template takes one link, not one per app — so of
+  // The driver-route template takes one link, not one per app — so of
   // whichever apps the dispatcher ticked, the first one's URL is what
-  // actually goes out. The message preview below still shows all of them;
-  // only this one reaches the driver's phone.
+  // actually goes out. The preview below still shows all of them; with a
+  // template, only this one reaches the driver's phone. (Without a template
+  // the whole composed message goes as text, every ticked link included.)
   const routeUrl = selected.map((app) => urls[app]).find((u) => u !== null) ?? null;
 
   const canSend =
-    phone !== null && selected.length > 0 && geocodedCount > 0 && routeUrl !== null;
+    whatsapp.configured &&
+    phone !== null &&
+    selected.length > 0 &&
+    geocodedCount > 0 &&
+    routeUrl !== null;
 
   const copy = async (app: NavApp) => {
     const url = urls[app];
@@ -286,40 +289,45 @@ export function SendRouteDialog({
           <section>
             <div className="mb-2 flex flex-wrap items-center gap-3">
               <h3 className="text-heading text-ink">Message</h3>
-              <div className="flex gap-1 rounded-sm border border-hairline bg-surface-muted p-0.5">
-                {(["sms", "whatsapp", "rcs"] as Channel[]).map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => setChannel(c)}
-                    aria-pressed={channel === c}
-                    className={cx(
-                      "rounded-xs px-2.5 py-1 text-caption transition-colors",
-                      channel === c
-                        ? "bg-surface font-medium text-ink shadow-card"
-                        : "text-ink-muted hover:text-ink",
-                    )}
-                  >
-                    {c === "sms" ? "SMS" : c === "whatsapp" ? "WhatsApp" : "RCS"}
-                  </button>
-                ))}
-              </div>
-              <span className="ml-auto font-mono text-data-sm text-ink-subtle">
-                {meta.characters} chars · {meta.segments} segment
-                {meta.segments === 1 ? "" : "s"}
-              </span>
+              <Badge tone="ok" dot>
+                WhatsApp
+              </Badge>
             </div>
 
             <pre className="whitespace-pre-wrap break-words rounded-sm border border-hairline bg-surface-muted px-3 py-2.5 font-mono text-data-sm text-ink-muted">
               {body || "Select at least one navigation app."}
             </pre>
-            <p className="mt-1.5 text-caption text-ink-subtle">
-              A preview for your own reference — the send uses the registered
-              Sent template, with{" "}
-              <span className="font-mono text-data-sm">{routeUrl ?? "—"}</span>{" "}
-              as its link. The template&rsquo;s own wording may not match this
-              exactly.
-            </p>
+            {!whatsapp.configured ? (
+              <p className="mt-2 flex items-start gap-2 rounded-sm border border-danger-border bg-danger-soft px-3 py-2 text-caption text-ink-muted">
+                <Icon name="error" className="mt-px text-[15px] text-danger" />
+                <span>
+                  WhatsApp isn&rsquo;t connected — set{" "}
+                  <span className="font-mono">WHATSAPP_ACCESS_TOKEN</span> and{" "}
+                  <span className="font-mono">WHATSAPP_PHONE_NUMBER_ID</span>,
+                  then run Test connections in Integrations.
+                </span>
+              </p>
+            ) : whatsapp.template ? (
+              <p className="mt-1.5 text-caption text-ink-subtle">
+                A preview for your own reference — this goes out as the approved
+                template{" "}
+                <span className="font-mono text-data-sm">{whatsapp.template}</span>{" "}
+                with{" "}
+                <span className="font-mono text-data-sm">{routeUrl ?? "—"}</span>{" "}
+                as its link. The template&rsquo;s own wording is what the driver
+                reads, so it may not match this exactly.
+              </p>
+            ) : (
+              <p className="mt-2 flex items-start gap-2 rounded-sm border border-warn-border bg-warn-soft px-3 py-2 text-caption text-ink-muted">
+                <Icon name="schedule" className="mt-px text-[15px] text-warn" />
+                <span>
+                  No route template is set, so this goes as a plain message —
+                  and WhatsApp only delivers those to a driver who has written
+                  to your number in the last 24 hours. Otherwise it is refused.
+                  Name an approved template in Integrations → WhatsApp.
+                </span>
+              </p>
+            )}
 
             <p
               className={cx(
@@ -339,35 +347,17 @@ export function SendRouteDialog({
               {linkShortenerOn ? (
                 <span>
                   The link is shortened via short.io before it&rsquo;s sent, so
-                  the SMS stays short enough to arrive in one piece.
+                  it stays readable and easy to tap in the chat.
                 </span>
               ) : (
                 <span>
-                  short.io isn&rsquo;t set up, so the full link is sent — that is
-                  what arrives cut off. Add <span className="font-mono">SHORTIO_API_KEY</span>{" "}
+                  short.io isn&rsquo;t set up, so the full link is sent — a
+                  long, unwieldy URL. Add <span className="font-mono">SHORTIO_API_KEY</span>{" "}
                   and <span className="font-mono">SHORTIO_DOMAIN</span> in
                   Integrations, then run Test connections.
                 </span>
               )}
             </p>
-
-            {meta.unicode && channel === "sms" ? (
-              <label className="mt-2 flex items-start gap-2 rounded-sm border border-warn-border bg-warn-soft px-3 py-2 text-caption text-ink-muted">
-                <input
-                  type="checkbox"
-                  checked={forceGsm}
-                  onChange={(e) => setForceGsm(e.target.checked)}
-                  className="mt-0.5 size-3.5 accent-brand"
-                />
-                <span>
-                  An accented character forces UCS-2 encoding, cutting each
-                  segment from 153 to 67 characters. Strip accents to send this
-                  as {smsSegments(toGsm7(body)).segments} segment
-                  {smsSegments(toGsm7(body)).segments === 1 ? "" : "s"} instead
-                  of {meta.segments}.
-                </span>
-              </label>
-            ) : null}
           </section>
         </div>
 
@@ -410,7 +400,7 @@ export function SendRouteDialog({
             onClick={() => {
               if (sentWarning) {
                 // Already sent — this button now just acknowledges the warning.
-                onSend({ channel, to: phone ?? "" });
+                onSend({ channel: "whatsapp", to: phone ?? "" });
                 return;
               }
               setSendError(null);
@@ -419,7 +409,6 @@ export function SendRouteDialog({
                   loadId: load.id,
                   driverId: load.driver?.id ?? null,
                   toPhone: phone ?? "",
-                  channel,
                   routeUrl: routeUrl ?? "",
                   previewBody: body,
                 });
@@ -428,7 +417,7 @@ export function SendRouteDialog({
                     `Sent — but the link could not be shortened (${result.linkNote ?? "reason unknown"}), so the driver got the full URL. Fix it in Integrations → Test connections.`,
                   );
                 } else if (result.ok) {
-                  onSend({ channel: result.channel ?? channel, to: phone ?? "" });
+                  onSend({ channel: result.channel ?? "whatsapp", to: phone ?? "" });
                 } else {
                   setSendError(result.message ?? "Could not send the route.");
                 }
@@ -440,7 +429,7 @@ export function SendRouteDialog({
               : sentWarning
                 ? "Done"
                 : phone
-                  ? `Send ${channel.toUpperCase()}`
+                  ? "Send on WhatsApp"
                   : "No driver number"}
           </Button>
         </footer>

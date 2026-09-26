@@ -6,9 +6,10 @@ import { requireAccess } from "@/lib/auth/guard";
 import { getCurrentUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import {
-  readConfig as readSentConfig,
-  verifyConnection as verifySentConnection,
-} from "@/lib/messaging/sent";
+  missingConfigMessage as whatsappMissingMessage,
+  readConfig as readWhatsAppConfig,
+  verifyConnection as verifyWhatsAppConnection,
+} from "@/lib/messaging/whatsapp";
 import {
   readShortioConfig,
   verifyShortioConnection,
@@ -109,33 +110,33 @@ export interface ConnectionTestResult {
  * The "Test connections" button's actual work.
  *
  * Only ever tests what has a **free** check — sending a real message to prove
- * a channel works is not a test, it is a bill. Today that is Sent's
- * `GET /v3/me` and a 1×1 Routes matrix request (a fraction of a cent — the
- * Routes API has no free endpoint). Reveal, Geotab, geocoding and the rest
- * have no equivalent wired up yet, so they are silently left out rather than
- * reported as failing for a check that was never attempted.
+ * a channel works is not a test, it is a bill. Today that is WhatsApp's
+ * phone-number profile read (free, reaches nobody) plus Short.io, geocoding
+ * and routing. Reveal, Geotab and the rest have no equivalent wired up yet, so
+ * they are silently left out rather than reported as failing for a check that
+ * was never attempted.
  */
 export async function testConnections(): Promise<ConnectionTestResult[]> {
   await requireAccess("/integration-settings");
 
   const results: ConnectionTestResult[] = [];
 
-  const sentConfig = readSentConfig();
-  if (!sentConfig) {
+  const whatsappConfig = readWhatsAppConfig();
+  if (!whatsappConfig) {
     results.push({
-      id: "sent",
-      name: "Sent (sent.dm)",
+      id: "whatsapp",
+      name: "WhatsApp (Meta Cloud API)",
       ok: false,
-      message: "SENT_DM_API_KEY is not set.",
+      message: whatsappMissingMessage(),
     });
   } else {
-    const check = await verifySentConnection(sentConfig);
+    const check = await verifyWhatsAppConnection(whatsappConfig);
     results.push({
-      id: "sent",
-      name: "Sent (sent.dm)",
+      id: "whatsapp",
+      name: "WhatsApp (Meta Cloud API)",
       ok: check.ok,
       message: check.ok
-        ? "Key is valid."
+        ? `Token is valid for ${check.detail ?? "this number"}.`
         : (check.error ?? `Request failed (${check.status}).`),
     });
   }

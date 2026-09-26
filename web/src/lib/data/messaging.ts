@@ -1,37 +1,42 @@
 "use server";
 
-import { randomUUID } from "node:crypto";
-
 import { revalidatePath } from "next/cache";
 
 import { getCurrentUser } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { DEFAULT_CONFIG } from "@/lib/integrations/catalogue";
-import { readConfig as readSentConfig, sendMessage } from "@/lib/messaging/sent";
+import {
+  missingConfigMessage,
+  readConfig as readWhatsAppConfig,
+  sendWhatsApp,
+} from "@/lib/messaging/whatsapp";
 import { readShortioConfig, shortenUrl } from "@/lib/messaging/shortio";
 import type { Channel } from "@/lib/driver-messaging";
 
 /**
- * The seam `route-actions.tsx` was waiting on: actually calling Sent, and
- * recording what happened in `driver_messages` (migration 0005).
+ * Sending a driver their route over WhatsApp, and recording what happened in
+ * `driver_messages` (migration 0005).
  *
- * Sends by **template**, not raw `text` — the driver route template already
- * exists in the Sent dashboard, so `sendMessage` gets `template.id` +
- * `parameters.routeURL` instead of a composed body. The dispatcher-facing
- * preview in `SendRouteDialog` still shows a composed body for readability;
- * what actually goes out is whatever wording is registered on the template,
- * with `routeURL` substituted in. The two are not guaranteed to read
- * identically — the template is the source of truth for the words.
+ * **Two ways out, and which one runs depends on one setting.**
+ *
+ * - With a *driver route template* named on Integration Settings → WhatsApp,
+ *   the send is a WhatsApp **template message** with the navigation link as its
+ *   one variable. This is the only kind that can reach a driver who has not
+ *   written to the business number in the last 24 hours — which is the normal
+ *   case, so it is the one to set up. What the driver reads is the wording
+ *   approved on the template; the dispatcher's preview is for reference.
+ * - With none, the composed message goes as free-form **text**, every ticked
+ *   navigation link included. WhatsApp only delivers that inside the 24-hour
+ *   customer-service window, so it fails with an explained error otherwise.
  */
 
 export interface SendDriverRouteInput {
   loadId: string;
   driverId: string | null;
   toPhone: string;
-  channel: Channel;
-  /** The single navigation link the template's `routeURL` variable takes. */
+  /** The navigation link — the template's one variable, or the text's link. */
   routeUrl: string;
-  /** The dispatcher-facing preview body, stored for the audit trail only. */
+  /** The dispatcher-facing composed body. Sent as text when no template is set; stored for the audit trail either way. */
   previewBody: string;
 }
 
@@ -50,23 +55,47 @@ export interface SendDriverRouteResult {
   linkNote: string | null;
 }
 
-/** Reads the Sent connector's saved config, falling back to its catalogue defaults. */
-async function loadSentTemplateId(
-  key: "template_route_link",
-): Promise<string | null> {
+export interface WhatsAppRouteStatus {
+  /** Access token and phone-number id are both set. */
+  configured: boolean;
+  /** The approved template the route goes out as, or null for free-form text. */
+  template: string | null;
+}
+
+/** The WhatsApp connector's saved, non-secret settings over its catalogue defaults. */
+async function loadWhatsAppSettings(): Promise<{
+  template: string | null;
+  language: string;
+}> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("integration_settings")
     .select("config")
-    .eq("connector_id", "sent")
+    .eq("connector_id", "whatsapp")
     .maybeSingle();
 
   const config = {
-    ...DEFAULT_CONFIG.sent,
+    ...DEFAULT_CONFIG.whatsapp,
     ...((data?.config as Record<string, unknown>) ?? {}),
   };
-  const value = config[key];
-  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+  const text = (value: unknown) =>
+    typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+  return {
+    template: text(config.template_route_link),
+    language: text(config.template_language) ?? "en",
+  };
+}
+
+/**
+ * What the Send-route dialog needs to tell the dispatcher, before they send,
+ * how the message will go out. Not secret — a template name and two booleans.
+ */
+export async function getWhatsAppRouteStatus(): Promise<WhatsAppRouteStatus> {
+  const settings = await loadWhatsAppSettings();
+  return {
+    configured: readWhatsAppConfig() !== null,
+    template: settings.template,
+  };
 }
 
 export async function sendDriverRouteMessage(
@@ -83,32 +112,23 @@ export async function sendDriverRouteMessage(
     if (!user)
       return { ok: false, message: "Not signed in.", channel: null, ...linkOutcome };
 
-    const sentConfig = readSentConfig();
-    if (!sentConfig) {
+    const config = readWhatsAppConfig();
+    if (!config) {
       return {
         ok: false,
-        message: "Sent is not configured — SENT_DM_API_KEY is not set.",
+        message: missingConfigMessage(),
         channel: null,
         ...linkOutcome,
       };
     }
 
-    const templateId = await loadSentTemplateId("template_route_link");
-    if (!templateId) {
-      return {
-        ok: false,
-        message:
-          "No driver route template is set on Integration Settings → Sent.",
-        channel: null,
-        ...linkOutcome,
-      };
-    }
+    const settings = await loadWhatsAppSettings();
 
     // Shorten the navigation link before it goes out. A multi-stop Google Maps
-    // URL is ~500 chars, which fragments the SMS — and a dropped fragment
-    // leaves the driver with a dead, truncated link. Best-effort: if short.io
-    // is not configured or the call fails, the full URL is sent instead — and
-    // `linkOutcome` records which, so the dispatcher is told.
+    // URL is ~500 characters — unreadable in a chat bubble and awkward to tap.
+    // Best-effort: if short.io is not configured or the call fails, the full
+    // URL is sent instead — and `linkOutcome` records which, so the dispatcher
+    // is told.
     let routeUrl = input.routeUrl;
     let storedBody = input.previewBody;
     const shortio = readShortioConfig();
@@ -124,32 +144,31 @@ export async function sendDriverRouteMessage(
       }
     }
 
-    const result = await sendMessage(sentConfig, {
-      to: [input.toPhone],
-      template: { id: templateId, parameters: { routeURL: routeUrl } },
-      // The dispatcher picked a channel in the dialog — an explicit
-      // single-channel array, not "auto", so the send goes exactly where they
-      // chose rather than wherever Sent's fallback would have picked.
-      deliverBy: [input.channel],
-      // A fresh key per click: this is a one-off dispatcher action, not a
-      // background job that retries on its own, so there is no natural
-      // stable key the way `(load_item_id, type)` is for the automated
-      // alerts — and a stable key here would block a deliberate resend.
-      idempotencyKey: randomUUID(),
-    });
+    const result = await sendWhatsApp(
+      config,
+      settings.template
+        ? {
+            to: input.toPhone,
+            template: {
+              name: settings.template,
+              language: settings.language,
+              bodyParameters: [routeUrl],
+            },
+          }
+        : { to: input.toPhone, text: storedBody },
+    );
 
     const supabase = await createClient();
-    const sentChannel = (result.recipients[0]?.channel as Channel | undefined) ?? input.channel;
 
     const { error: insertError } = await supabase.from("driver_messages").insert({
       load_id: input.loadId,
       driver_id: input.driverId,
-      channel: sentChannel,
+      channel: "whatsapp",
       to_phone: input.toPhone,
       body: storedBody,
       kind: "route_link",
       sent_by: user.id,
-      provider_sid: result.recipients[0]?.messageId ?? null,
+      provider_sid: result.messageId,
       status: result.ok ? "queued" : "failed",
       failure_reason: result.ok ? null : result.error,
     });
@@ -163,7 +182,7 @@ export async function sendDriverRouteMessage(
         message: result.ok
           ? `Sent, but the record could not be saved: ${insertError.message}`
           : insertError.message,
-        channel: sentChannel,
+        channel: "whatsapp",
         ...linkOutcome,
       };
     }
@@ -172,8 +191,8 @@ export async function sendDriverRouteMessage(
 
     return {
       ok: result.ok,
-      message: result.ok ? null : (result.error ?? "Sent refused the message."),
-      channel: sentChannel,
+      message: result.ok ? null : (result.error ?? "WhatsApp refused the message."),
+      channel: "whatsapp",
       ...linkOutcome,
     };
   } catch (e) {

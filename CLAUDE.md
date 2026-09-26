@@ -1,8 +1,9 @@
 # Balkania TMS
 
 Smart logistics dispatch platform: syncs orders from a CRM, tracks trucks via
-GPS/telematics, geofences delivery stops, and sends automated SMS/WhatsApp
-customer alerts via Sent (sent.dm).
+GPS/telematics, geofences delivery stops, and sends automated WhatsApp
+customer alerts over Meta's WhatsApp Business Cloud API (WhatsApp is the only
+messaging channel).
 
 **The operation is Ireland-based** — the depot is Sanguine House, Huntstown
 Business Park, Cappagh Road, Dublin 11 (D11 T9TF), set in
@@ -34,7 +35,7 @@ keep it and `supabase/migrations/` in sync.
     length, Euro class and ADR classes
   - `0004_auth_roles.sql` — `profiles` (role), `integration_settings`, and **RLS on
     every table**. This is where access control actually lives.
-  - `0005_driver_messaging.sql` — `driver_messages`: dispatcher → driver SMS/WhatsApp
+  - `0005_driver_messaging.sql` — `driver_messages`: dispatcher → driver WhatsApp
     (navigation links). Drivers only, never customers.
   - `0006_fleetmatics_gps.sql` — `trucks.gps_sequence_id` and `last_known_address`
     for the Verizon Connect Reveal push feed
@@ -45,7 +46,8 @@ keep it and `supabase/migrations/` in sync.
     truck a driver normally runs. Deliberately **not** unique — double-shifting
     one tractor is normal — and stamped by a trigger so an unrelated edit does
     not make the pairing look freshly set
-  - `0007_sent_channels.sql` — widens `driver_messages.channel` to include RCS
+  - `0007_sent_channels.sql` — widened `driver_messages.channel` to include RCS
+    (superseded by 0023)
   - `0008_production_reads.sql` — `orders.promised_at`, the `*_geo` views that
     expose lat/lng, and the analytics RPCs
   - `0012_geocode_cache.sql` — `geocode_cache`: resolved delivery locations
@@ -89,6 +91,11 @@ keep it and `supabase/migrations/` in sync.
     `ROUTED_ETA_TTL_MS`. Exists because the previous throttle was a `Map` in
     one serverless instance's memory, which on Vercel is close to no throttle
     at all — see "Routing & ETA" below.
+  - `0022_vehicle_type.sql` — `trucks.vehicle_type` (`truck` | `van`, NOT NULL
+    default `truck`, CHECK). Dispatcher-owned; the Reveal sync never writes it.
+    A van with no dimensions recorded routes on van defaults (3.5 t / 2.8 m /
+    6 m, `DEFAULT_VAN_VEHICLE`) instead of the 44 t artic. Exposed via
+    `trucks_geo`; labels and icons in `lib/vehicle-types.ts`.
   - `0021_route_leg_cache.sql` — `route_leg_cache`: the *other* half of the
     same mistake. The auto-planner's matrix legs were held only in a
     module-level object in one browser tab, so a refresh re-bought the lot and
@@ -114,7 +121,7 @@ keep it and `supabase/migrations/` in sync.
   - `src/lib/telematics/fleetmatics.ts` — Verizon Connect Reveal client + GPS push normaliser
   - `src/app/api/webhooks/gps/route.ts` — the Reveal GPS webhook (Basic auth, replay-guarded)
   - `src/lib/navigation-links.ts` — Waze / Google Maps / Apple Maps deep links + HGV caveats
-  - `src/lib/driver-messaging.ts` — driver SMS composition and GSM-7 segment counting
+  - `src/lib/driver-messaging.ts` — driver WhatsApp message composition
   - `src/lib/csv.ts` — RFC 4180 CSV reader/writer (quotes, BOM, CRLF, delimiter detection)
   - `src/lib/orders-import.ts` — CSV column schema, auto-mapping and row validation
   - `src/lib/regions.ts` — country registry: dial prefixes, postcode shapes, weight/height
@@ -138,7 +145,7 @@ keep it and `supabase/migrations/` in sync.
   - `src/lib/integrations/` — connector catalogue, config store, messaging policy
   - `src/lib/types.ts` — row types mirroring the migration
   - `src/lib/supabase/` — `client.ts` (browser), `server.ts` (RSC/route handlers, cookie-based), `service.ts` (service-role, server-only, bypasses RLS — for webhooks/cron)
-  - `.env.example` — required env vars (Supabase, Sent, geocoding, GPS provider); copy to `.env.local` and fill in
+  - `.env.example` — required env vars (Supabase, WhatsApp, geocoding, GPS provider); copy to `.env.local` and fill in
 
 ## Design system
 
@@ -288,7 +295,7 @@ engine, one row per type per stop in `notifications`, guarded by
 `UNIQUE (load_item_id, type)` and by `orders.notifications_opt_out`.
 
 **There is no dispatcher-initiated customer message, and adding one is a
-deliberate decision, not a convenience.** No tracking-link SMS, no public
+deliberate decision, not a convenience.** No tracking-link message, no public
 tracking page — a public tracking URL is a standing exposure of someone's
 delivery address, and the three automated alerts already tell the customer what
 they need.
@@ -335,17 +342,13 @@ Maps. The three are **not** equivalent and the UI must not imply they are:
   `navigationUrl()` still only emits `origin`/`saddr` when one is passed; Waze
   has no origin parameter and always uses the device position.
 
-Keep the default SMS body inside GSM-7. A single em dash or accented character
-flips the whole message to UCS-2 and cuts the per-segment budget from 153 to 67
-characters — that alone doubled a route message from 3 segments to 6.
-
 **The navigation link is shortened before it sends.** A multi-stop Google Maps
-URL is ~500 characters; the route SMS then spans four or more segments, and a
-concatenated SMS is reassembled by the handset from separately delivered parts
-— drop one and the driver gets a truncated, dead link. `lib/messaging/shortio.ts`
-(Short.io, `POST /links`, raw key in `Authorization` — not Bearer) turns it
-into a ~25-character link, called from `sendDriverRouteMessage` just before the
-Sent call. **Best-effort:** no `SHORTIO_API_KEY` / `SHORTIO_DOMAIN`, a bad
+URL is ~500 characters — an unreadable wall in a chat bubble (the shortener
+predates WhatsApp, when the same length fragmented an SMS; that failure is gone,
+the readability reason remains). `lib/messaging/shortio.ts` (Short.io,
+`POST /links`, raw key in `Authorization` — not Bearer) turns it into a
+~25-character link, called from `sendDriverRouteMessage` just before the
+WhatsApp call. **Best-effort:** no `SHORTIO_API_KEY` / `SHORTIO_DOMAIN`, a bad
 domain, a rate limit or a >4 s response all fall back to the full URL — but the
 outcome is **reported**, not silent: `SendDriverRouteResult.link` is
 `shortened` / `full_url` / `shorten_failed` (+ `linkNote`), the Send-route
@@ -355,47 +358,61 @@ is visible. Every route link is shortened (no length threshold);
 `allowDuplicates: false` means a resend reuses the existing short link without
 spending plan quota. `driver_messages.body` records the link that went out.
 
-## Messaging provider — Sent (sent.dm)
+## Messaging — WhatsApp (Meta Cloud API)
 
-`POST https://api.sent.dm/v3/messages`, authenticated with an **`x-api-key`**
-header holding a UUID. Their authentication reference is explicit that this is
-header-key auth, *not* `Authorization: Bearer`. Client in
-`web/src/lib/messaging/sent.ts` — a plain `fetch` client, so no runtime
-dependency; the official SDK is `@sentdm/sentdm` if that ever changes.
+**WhatsApp is the only messaging channel, and there is no gateway in between.**
+Sent (sent.dm) was removed; there is no SMS, no RCS and no channel choice
+anywhere — not in the Send-route dialog, not in alert settings. Adding a channel
+back is a deliberate decision, and migration 0023 makes the database refuse it
+(`driver_messages.channel` CHECK is `whatsapp` only, `NOT VALID` so old
+`sms`/`rcs` rows stay readable).
 
-Behaviours that differ from a Twilio-shaped API, and two of them cost money:
+`POST https://graph.facebook.com/{version}/{phone-number-id}/messages`,
+`Authorization: Bearer <token>`. Client in `web/src/lib/messaging/whatsapp.ts` —
+plain `fetch`, no SDK. Credentials: `WHATSAPP_ACCESS_TOKEN` (a **permanent**
+system-user token — the API-setup page's temporary one dies in 24 h),
+`WHATSAPP_PHONE_NUMBER_ID` (the sending number's id, not the number), optional
+`WHATSAPP_API_VERSION` (default `v22.0`).
 
-- **`channel` is a broadcast list, not a fallback order.** `["sms","whatsapp"]`
-  sends *two* messages and bills for both; the customer gets the alert twice.
-  The value meaning "pick one, with fallback" is the sentinel **`["sent"]`** —
-  also the server-side default when `channel` is omitted. `deliverBy: "auto"`
-  sends it explicitly rather than depending on a default that could change.
-  There is deliberately no "all channels" option in the UI.
-- **`template` and `text` are mutually exclusive** — exactly one, or 400. Raw
-  `text` is supported, so the app's templates need nothing registered with the
-  provider.
-- **The response is enveloped.** Message ids live at
-  `data.recipients[].message_id` — one per recipient, not one per call — with
-  `meta.request_id` for support queries. Reading a top-level `message_id`
-  silently yields null.
-- **`sandbox: true`** validates auth, body and template without sending or
-  billing. Use it for the first end-to-end run.
-- **`Idempotency-Key`** is how a retried send avoids double-billing and
-  double-alerting; derive it from `(load_item_id, type)`.
-- **`GET /v3/me`** is the free connection test — `verifyConnection()`. A test
-  button that sends a real message is not a test.
+Behaviours that matter, and one of them decides whether a send works at all:
 
-RCS is a first-class channel alongside SMS and WhatsApp (migration 0007 widened
-the `driver_messages.channel` CHECK to match).
+- **A business can only open a conversation with an approved template.**
+  Free-form `text` is delivered only within 24 hours of the recipient messaging
+  *this number*; outside it Meta refuses with error 131047. A driver who has
+  never written in is always outside the window, so the driver route must go as
+  a **template** — created and approved in WhatsApp Manager (category Utility,
+  one body variable `{{1}}` = the link), its **name** entered on Integration
+  Settings → WhatsApp (`template_route_link`, plus `template_language`, which
+  must match the approved language exactly). With no template set,
+  `sendDriverRouteMessage` falls back to free-form text and the dialog says
+  plainly that it will only reach a driver inside the window. Seeding a
+  template name in `DEFAULT_CONFIG` would be a guess Meta can reject, so it is
+  empty on purpose.
+- **A template variable cannot contain a newline, a tab or 4+ spaces.** So a
+  template carries the *link alone*; with a template, only the first ticked
+  navigation app's URL goes out (the preview shows all). Text mode sends the
+  whole composed message.
+- **No idempotency key.** Nothing retries a send on its own; a double-send is a
+  double click. Do not add automatic retry without a way to tell "timed out"
+  from "not sent".
+- **`200` means accepted, not delivered.** `driver_messages.provider_sid` holds
+  the `wamid.…`; `status` is set at send time only. Meta's status/inbound
+  webhook (`X-Hub-Signature-256`, HMAC-SHA256 of the raw body with the app
+  secret) is **not consumed** — no route exists. Add the route and the verifier
+  together if receipts or STOP handling over WhatsApp are wanted.
+- **Recipient is digits only, country code first** (`whatsappNumber()`).
+  A number with no `+`/`00` prefix is rejected, not guessed at — prefixing the
+  wrong country would message a stranger.
+- **`GET /{phone-number-id}`** is the free connection test —
+  `verifyConnection()`. It also proves the token and the number belong
+  together. A test button that sends a real message is not a test.
+- Error codes are translated in `explain()` (131047 window, 132001 template
+  missing, 131030 not on the test allow-list, 190 token, rate limits); anything
+  else shows Meta's own text.
 
-**`SENT_DM_API_KEY` is the only Sent credential.** Confirmed against the live
-account: sending works on the `x-api-key` header alone — no `x-profile-id`
-sender-profile header (`SENT_PROFILE_ID` is gone). Inbound delivery-status
-receipts are not consumed — there is no route and `driver_messages.status` is
-set only at send time — so the signature verifier and `SENT_WEBHOOK_SECRET`
-were removed rather than shipped unwired. If receipts are wanted later, re-add
-the `whsec_` HMAC scheme (SHA-256 over `{id}.{timestamp}.{rawBody}`, exact
-received bytes, five-minute replay window) together with the route.
+Customer alert templates (`template_dispatch_confirmation`, `template_proximity`,
+`template_delivery_complete`) are configurable but unused until the alert engine
+exists.
 
 ## Order intake
 
@@ -900,7 +917,7 @@ front of HERE), and `fixOrderAddress` (writes a `manual` entry).
 - **Geofence *customer alerts* are still unbuilt.** Arrival tracking and
   auto-delivery exist (`stop_visits`, `lib/telematics/geofence.ts` — see
   "Finishing a load"), but nothing writes `notifications` rows: no dispatch
-  confirmation, no proximity alert, no delivery-complete SMS. Wiring those to
+  confirmation, no proximity alert, no delivery-complete message. Wiring those to
   the visit lifecycle is a separate task, bound by the opt-out / GDPR rules and
   by real per-message cost. `estimateMinutes()` in `lib/format.ts` remains a
   crude 45 km/h stand-in for display only and must never gate an alert.

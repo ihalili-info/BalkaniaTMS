@@ -32,6 +32,12 @@ export type NotificationType =
  */
 export type TruckAvailability = "available" | "unavailable" | "maintenance";
 
+/**
+ * What kind of fleet unit a `Truck` row is (migration 0022). The type keeps
+ * its historical name — it is the generic word for a fleet unit here.
+ */
+export type VehicleType = "truck" | "van";
+
 export interface Truck {
   id: string;
   license_plate: string;
@@ -39,6 +45,9 @@ export interface Truck {
   gps_device_id: string;
   /** Reveal device ESN — the webhook's fallback join key (migration 0013). */
   gps_esn: string | null;
+
+  /** Declared by the dispatcher. Sets routing defaults and the icon. */
+  vehicle_type: VehicleType;
 
   /* --- owned by the telematics feed --- */
   current_location: LatLng | null;
