@@ -551,11 +551,15 @@ export function AutoPlanDialog({
                 const off = dropped.has(index);
                 const chosen = truckFor(load, index);
                 const needsCmr = requiresCmr(load.regime);
+                // The same colour the map draws this group in, so a card and
+                // its route are matched by eye rather than by counting.
+                const colour = `var(${groupColour(index).token})`;
                 return (
                   <li
                     key={index}
+                    style={{ borderLeftColor: colour }}
                     className={cx(
-                      "rounded-lg border transition-colors",
+                      "rounded-lg border border-l-4 transition-colors",
                       off
                         ? "border-hairline bg-surface-muted opacity-60"
                         : "border-hairline bg-surface",
@@ -575,6 +579,11 @@ export function AutoPlanDialog({
                             return next;
                           })
                         }
+                      />
+                      <span
+                        className="size-3 shrink-0 rounded-full"
+                        style={{ background: colour }}
+                        aria-hidden="true"
                       />
                       <span className="text-heading text-ink">
                         Group {index + 1}
@@ -623,7 +632,10 @@ export function AutoPlanDialog({
                           key={stop.id}
                           className="flex items-center gap-3 px-4 py-2"
                         >
-                          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-brand font-mono text-label text-ink-inverse">
+                          <span
+                            className="flex size-5 shrink-0 items-center justify-center rounded-full font-mono text-label text-ink-inverse"
+                            style={{ background: colour }}
+                          >
                             {i + 1}
                           </span>
                           <span className="min-w-0 flex-1">
