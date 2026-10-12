@@ -1,3 +1,5 @@
+import { cache } from "react";
+
 import { selectInChunks } from "@/lib/data/in-chunks";
 import { haversineMeters } from "@/lib/format";
 import { routeLeg, routingConfigured, type RouteLeg } from "@/lib/routing/here";
@@ -36,7 +38,7 @@ const point = (row: GeoRow): LatLng | null =>
 
 /* --- trucks ----------------------------------------------------------------- */
 
-export async function getTrucks(): Promise<Truck[]> {
+export const getTrucks = cache(async (): Promise<Truck[]> => {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("trucks_geo")
@@ -72,11 +74,11 @@ export async function getTrucks(): Promise<Truck[]> {
     gps_sequence_id: row.gps_sequence_id,
     last_known_address: row.last_known_address,
   }));
-}
+});
 
 /* --- drivers ---------------------------------------------------------------- */
 
-export async function getDrivers(): Promise<Driver[]> {
+export const getDrivers = cache(async (): Promise<Driver[]> => {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("drivers")
@@ -85,7 +87,7 @@ export async function getDrivers(): Promise<Driver[]> {
 
   if (error) throw new Error(`Could not load drivers: ${error.message}`);
   return (data ?? []) as Driver[];
-}
+});
 
 /* --- orders ----------------------------------------------------------------- */
 
@@ -130,7 +132,12 @@ function toOrder(row: OrderGeoRow): Order {
 /** PostgREST silently truncates at its `max-rows` (1000 on Supabase). */
 const ORDERS_PAGE = 1000;
 
-export async function getOrders(): Promise<Order[]> {
+/**
+ * Wrapped in `cache()`, like the other readers here, because the dashboard
+ * layout and the page both read orders (and `getLoads()` reads them again):
+ * without it the Orders Queue pulled the whole table four times per render.
+ */
+export const getOrders = cache(async (): Promise<Order[]> => {
   const supabase = await createClient();
   const rows: OrderGeoRow[] = [];
 
@@ -152,7 +159,7 @@ export async function getOrders(): Promise<Order[]> {
   }
 
   return rows.map(toOrder);
-}
+});
 
 /* --- loads ------------------------------------------------------------------ */
 
@@ -207,9 +214,17 @@ function needsStopDetail(row: {
  * the dashboard layout on every navigation; only Active Loads and the Live
  * Fleet Map, which actually show an ETA, ask for it.
  */
-export async function getLoads(
+export function getLoads(
   { routedEtas = false }: { routedEtas?: boolean } = {},
 ): Promise<LoadView[]> {
+  return loadsFor(routedEtas);
+}
+
+/**
+ * Keyed on the flag rather than the options object, so the layout's
+ * `getLoads()` and a page's `getLoads()` share one read per request.
+ */
+const loadsFor = cache(async (routedEtas: boolean): Promise<LoadView[]> => {
   const supabase = await createClient();
 
   const [{ data: loadRows, error }, trucks, drivers, orders] = await Promise.all(
@@ -361,7 +376,7 @@ export async function getLoads(
 
   if (routedEtas) await attachRoutedEtas(views);
   return views;
-}
+});
 
 /**
  * How long a routed ETA is reused before asking the provider again, keyed on

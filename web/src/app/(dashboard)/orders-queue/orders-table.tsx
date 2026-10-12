@@ -57,6 +57,12 @@ const DATE_PRESETS: { label: string; range: () => [string, string] }[] = [
   { label: "7 days", range: () => [utcDay(-6), utcDay()] },
 ];
 
+/**
+ * Rows rendered at once. Counts, stats and selection still cover the whole
+ * filtered queue — only the DOM is paged, which is where the time went.
+ */
+const PAGE_SIZE = 50;
+
 const dateInputClass =
   "h-9 rounded-sm border border-hairline bg-surface-muted px-2 text-body-sm text-ink outline-none focus:border-brand-border focus:bg-surface";
 
@@ -91,6 +97,7 @@ export function OrdersTable({
   const [selected, setSelected] = useState<string[]>([]);
   const [deleting, setDeleting] = useState(false);
   const [planning, setPlanning] = useState(false);
+  const [page, setPage] = useState(0);
 
   const dated = from !== "" || to !== "";
 
@@ -132,8 +139,23 @@ export function OrdersTable({
     });
   }, [inRange, filter, query]);
 
-  // Only unassigned orders can be put on a new load.
-  const selectable = visible.filter((o) => o.status === "pending");
+  // Back to the first page when the filters change — but not when a row is
+  // edited, deleted or imported, which would throw the dispatcher off page 3.
+  const filterKey = `${filter}|${query}|${from}|${to}`;
+  const [pagedFor, setPagedFor] = useState(filterKey);
+  if (pagedFor !== filterKey) {
+    setPagedFor(filterKey);
+    setPage(0);
+  }
+
+  const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+  // Clamped, so deleting the last rows of the last page cannot strand it.
+  const current = Math.min(page, pageCount - 1);
+  const pageRows = visible.slice(current * PAGE_SIZE, (current + 1) * PAGE_SIZE);
+
+  // Only unassigned orders can be put on a new load. The header checkbox works
+  // on the page in view; ticks on other pages are kept.
+  const selectable = pageRows.filter((o) => o.status === "pending");
   const allSelected =
     selectable.length > 0 && selectable.every((o) => selected.includes(o.id));
 
@@ -142,8 +164,14 @@ export function OrdersTable({
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
 
-  const toggleAll = () =>
-    setSelected(allSelected ? [] : selectable.map((o) => o.id));
+  const toggleAll = () => {
+    const ids = new Set(selectable.map((o) => o.id));
+    setSelected((prev) =>
+      allSelected
+        ? prev.filter((id) => !ids.has(id))
+        : [...prev, ...selectable.map((o) => o.id).filter((id) => !prev.includes(id))],
+    );
+  };
 
   return (
     <Card>
@@ -311,7 +339,7 @@ export function OrdersTable({
                   checked={allSelected}
                   onChange={toggleAll}
                   disabled={selectable.length === 0}
-                  aria-label="Select all assignable orders"
+                  aria-label="Select all assignable orders on this page"
                   className="size-3.5 accent-brand"
                 />
               </Th>
@@ -326,7 +354,7 @@ export function OrdersTable({
             </tr>
           </thead>
           <tbody>
-            {visible.map((order) => {
+            {pageRows.map((order) => {
               const ref = loadRefByOrderId[order.id];
               const ungeocoded = order.delivery_location === null;
               return (
@@ -434,6 +462,51 @@ export function OrdersTable({
           </tbody>
         </Table>
       )}
+
+      {visible.length > PAGE_SIZE ? (
+        <div className="flex flex-wrap items-center gap-3 border-t border-hairline px-5 py-3">
+          <span className="text-body-sm text-ink-muted tabular">
+            {current * PAGE_SIZE + 1}–
+            {Math.min((current + 1) * PAGE_SIZE, visible.length)} of{" "}
+            {visible.length}
+          </span>
+          <div className="ml-auto flex items-center gap-1.5">
+            <Button
+              variant="ghost"
+              icon="first_page"
+              onClick={() => setPage(0)}
+              disabled={current === 0}
+              aria-label="First page"
+            />
+            <Button
+              variant="ghost"
+              icon="chevron_left"
+              onClick={() => setPage(current - 1)}
+              disabled={current === 0}
+            >
+              Previous
+            </Button>
+            <span className="px-1 text-body-sm text-ink-muted tabular">
+              Page {current + 1} of {pageCount}
+            </span>
+            <Button
+              variant="ghost"
+              onClick={() => setPage(current + 1)}
+              disabled={current >= pageCount - 1}
+            >
+              Next
+              <Icon name="chevron_right" className="text-[18px]" />
+            </Button>
+            <Button
+              variant="ghost"
+              icon="last_page"
+              onClick={() => setPage(pageCount - 1)}
+              disabled={current >= pageCount - 1}
+              aria-label="Last page"
+            />
+          </div>
+        </div>
+      ) : null}
     </Card>
   );
 }
