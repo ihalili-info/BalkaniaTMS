@@ -25,6 +25,9 @@ keep it and `supabase/migrations/` in sync.
 - `Project BalkaniaTMS.md` — architecture doc (source of truth for schema/design decisions)
 - `supabase/bootstrap_profiles.sql` — idempotent profile backfill + first-admin bootstrap
 - `supabase/diagnose_admin.sql` — prints a plain-English diagnosis per auth user
+- `supabase/repair_null_island.sql` — lists orders stored at `0, 0`, clears the point on
+  pending off-load ones so they re-geocode, and drops `0, 0` cache rows. Intake now refuses
+  supplied coordinates outside the delivery country (`suppliedPointProblem` in `regions.ts`)
 - `supabase/migrations/`
   - `0001_init.sql` — DB schema (PostGIS: trucks, orders, loads, load_items, notifications)
   - `0002_truck_details.sql` — dispatcher-owned truck columns (capacity, `features TEXT[]`,

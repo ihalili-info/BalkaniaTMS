@@ -15,6 +15,7 @@ import {
   HOME_COUNTRY,
   country,
   normalisePostcode,
+  suppliedPointProblem,
   type CountryCode,
 } from "./regions";
 import type { Order } from "./types";
@@ -290,7 +291,7 @@ export function validateRows(
       });
     }
 
-    // --- coordinates: both or neither ---
+    // --- coordinates: both or neither, inside the delivery country ---
     let location: { lat: number; lng: number } | null = null;
     const latRaw = values.latitude;
     const lngRaw = values.longitude;
@@ -315,7 +316,12 @@ export function validateRows(
           severity: "warning",
         });
       } else {
-        location = { lat, lng };
+        const problem = suppliedPointProblem({ lat, lng }, countryCode);
+        if (problem) {
+          issues.push({ field: "latitude", message: problem, severity: "warning" });
+        } else {
+          location = { lat, lng };
+        }
       }
     }
 

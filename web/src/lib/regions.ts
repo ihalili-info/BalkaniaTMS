@@ -277,6 +277,34 @@ export function looksTransposed(
   );
 }
 
+/**
+ * Why coordinates *supplied* with an order (CRM push or CSV column) must not be
+ * stored, or null when they are fine. Shared by both intake paths so they stay
+ * mirrored.
+ *
+ * `0, 0` is refused outright: it is what a CRM or connector sends when a
+ * numeric field defaults instead of being omitted, and it is in the Gulf of
+ * Guinea. Stored, every such order clusters together on null island and the
+ * auto-planner quotes a 12,000 km round trip. Anything else outside the
+ * delivery country's box is refused too — the order then geocodes from its
+ * address like one that arrived with no coordinates.
+ */
+export function suppliedPointProblem(
+  point: LatLngLike,
+  code: CountryCode,
+): string | null {
+  if (Math.abs(point.lat) < 1e-6 && Math.abs(point.lng) < 1e-6) {
+    return "Coordinates are 0, 0 (a blank placeholder, not a location) — ignored, address will be geocoded";
+  }
+  if (looksTransposed(point, code)) {
+    return "Latitude and longitude look swapped for the delivery country — ignored, address will be geocoded";
+  }
+  if (!isInCountry(point, code)) {
+    return `Coordinates are outside ${country(code).name} — ignored, address will be geocoded`;
+  }
+  return null;
+}
+
 /** Which known country a point falls in, if any — for "did you mean XI?". */
 export function countryForPoint(point: LatLngLike): CountryCode | null {
   // Northern Ireland sits inside the GB box too, so check it first.

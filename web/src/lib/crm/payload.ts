@@ -52,8 +52,8 @@ import {
   COUNTRIES,
   HOME_COUNTRY,
   country,
-  looksTransposed,
   normalisePostcode,
+  suppliedPointProblem,
   type CountryCode,
 } from "@/lib/regions";
 
@@ -292,7 +292,7 @@ export function parseCrmOrder(raw: CrmOrderInput): ParsedCrmOrder {
     );
   }
 
-  // --- coordinates: both or neither, in range, not transposed ---
+  // --- coordinates: both or neither, in range, inside the delivery country ---
   let location: { lat: number; lng: number } | null = null;
   const lat = asNumber(raw.latitude);
   const lng = asNumber(raw.longitude);
@@ -301,13 +301,10 @@ export function parseCrmOrder(raw: CrmOrderInput): ParsedCrmOrder {
       warn("latitude", "latitude and longitude must be supplied together");
     } else if (Math.abs(lat) > 90 || Math.abs(lng) > 180) {
       warn("latitude", "Coordinates are out of range — ignored, address will be geocoded");
-    } else if (looksTransposed({ lat, lng }, deliveryCountry)) {
-      warn(
-        "latitude",
-        "latitude and longitude look swapped for the delivery country — ignored, address will be geocoded",
-      );
     } else {
-      location = { lat, lng };
+      const problem = suppliedPointProblem({ lat, lng }, deliveryCountry);
+      if (problem) warn("latitude", problem);
+      else location = { lat, lng };
     }
   }
 

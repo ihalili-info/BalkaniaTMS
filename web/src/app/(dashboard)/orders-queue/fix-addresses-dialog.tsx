@@ -103,6 +103,9 @@ function AddressForm({
     const ln = Number.parseFloat(lng.replace(",", "."));
     if (!Number.isFinite(la) || !Number.isFinite(ln)) return null;
     if (Math.abs(la) > 90 || Math.abs(ln) > 180) return null;
+    // 0, 0 is a blank field, not a place — and saving it here would become a
+    // `manual` cache entry that every later order at this Eircode inherits.
+    if (la === 0 && ln === 0) return null;
     return { lat: la, lng: ln };
   }, [lat, lng]);
 

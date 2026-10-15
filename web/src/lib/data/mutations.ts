@@ -285,6 +285,12 @@ export async function fixOrderAddress(
     const user = await requireSession();
     const supabase = await createClient();
 
+    // The dialog refuses this too; a server action is a public endpoint. A 0, 0
+    // pin saved here would be cached as `manual` and outrank every geocode.
+    if (patch.delivery_location.lat === 0 && patch.delivery_location.lng === 0) {
+      return { ok: false, message: "0, 0 is not a location — place the pin on the address." };
+    }
+
     // A delivered stop records where the goods actually went. Redirecting it
     // afterwards would rewrite that; the queue lets you change the address only
     // while the order is still in flight.

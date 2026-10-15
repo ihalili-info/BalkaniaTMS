@@ -121,6 +121,9 @@ export async function lookupGeocodeCache(
 
   if (error || !data) return null;
   if (typeof data.lat !== "number" || typeof data.lng !== "number") return null;
+  // A 0, 0 row is a blank that slipped in, not a location — treat it as a miss
+  // so the address geocodes fresh instead of every order inheriting it.
+  if (data.lat === 0 && data.lng === 0) return null;
 
   void supabase.rpc("touch_geocode_cache", { p_key: key });
 
